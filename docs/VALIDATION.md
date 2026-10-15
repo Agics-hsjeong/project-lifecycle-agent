@@ -14,6 +14,10 @@ Windows/Python 3.12에서 36개 자동 테스트를 통과했습니다. 가상 �
 
 테스트 승인·문서는 모두 가상 데이터이며 고객 프로젝트나 배포 기본형에 넣지 않습니다. 엔진 테스트는 모델이 작성하는 제안서의 품질이나 모든 호스트의 스킬 자동 선택을 보장하지 않습니다. PDF/OCR·실제 Git/Figma/배포 실행은 호스트 환경과 권한에 따라 별도 확인해야 합니다.
 
+[GitHub Actions 0.3 엔진 검증](https://github.com/Agics-hsjeong/project-lifecycle-agent/actions/runs/38762532223)에서 Windows/Linux × Python 3.10/3.12 네 조합의 테스트·패키징이 모두 성공했습니다. 대상 커밋은 3b9f0c609287f54739493cb7d7dffa587d6a22bb입니다.
+
+수정한 스킬은 공식 quick_validate.py를 통과했고 Claude Code 2.1.300의 marketplace·plugin --strict 검증도 통과했습니다. 기존 사용자 설치를 호스트 명령으로 갱신하여 Codex와 Claude Code 모두 v0.3.0, installed/enabled 상태를 확인했습니다. 두 실제 설치 캐시의 starter.py doctor도 고객 작업 위치에서 ready=true로 실행되었습니다. 설치 캐시를 직접 수정하지 않았습니다. 새 스킬을 적용하려면 새 Codex 채팅/Claude Code 세션을 시작해야 합니다.
+
 ## 0.2.1 이전 검증 기록
 
 ## 자동 검증
