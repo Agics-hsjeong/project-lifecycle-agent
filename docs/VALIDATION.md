@@ -22,6 +22,6 @@ Skill Creator의 quick_validate.py가 `Skill is valid!`로 통과했습니다. �
 
 Claude Code 2.1.300 공식 패키지를 .test-output/claude-host에만 설치했습니다. `plugin validate . --strict`와 `plugin validate .claude-plugin/plugin.json --strict`가 경고 없이 통과했습니다. 격리된 .test-output/claude-profile에서 실제 marketplace 등록·플러그인 설치를 수행했고 v0.2.1, enabled=true를 확인했습니다. 사용자의 기존 Claude 설정·인증은 변경하지 않았고 모델 호출은 하지 않았습니다.
 
-로컬 자동 테스트는 Windows/Python 3.12에서 수행했습니다. Linux/Python 3.10 검증은 GitHub Actions 설정에 포함했지만 원격 실행 결과가 확인되기 전에는 통과로 주장하지 않습니다.
+로컬 자동 테스트는 Windows/Python 3.12에서 수행했습니다. [GitHub Actions 실행 #1](https://github.com/Agics-hsjeong/project-lifecycle-agent/actions/runs/38750433129)에서 Windows/Linux와 Python 3.10/3.12의 네 조합이 모두 성공했습니다. 해당 검증 대상 커밋은 ed3d6a943f2bf1ae9886403bb5e81a50e0a39370입니다.
 
 공개 GitHub 저장소 Agics-hsjeong/project-lifecycle-agent를 생성했고 visibility=public, 기본 브랜치 main을 확인했습니다. 고객 프로젝트·원본 자료·테스트 실행 환경은 공개 소스와 배포 패키지에서 제외합니다.
