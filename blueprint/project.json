@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "starter_version": "0.2.1",
+  "project_id": "TEMPLATE",
+  "name": "미정",
+  "business_type": "si",
+  "methodology": "hybrid",
+  "current_stage": "discovery",
+  "client_or_product_owner": "미정",
+  "project_manager": "미정",
+  "objective": "미정",
+  "scope_baseline": "미정",
+  "technical": {
+    "stack": "미정",
+    "repository": "미정",
+    "test_commands": [],
+    "deployment_target": "미정"
+  },
+  "tailoring": [],
+  "created_at": "",
+  "updated_at": ""
+}

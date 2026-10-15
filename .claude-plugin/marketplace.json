@@ -1,0 +1,12 @@
+{
+  "name": "project-lifecycle-marketplace",
+  "description": "RFP·사업 아이디어에서 개발·납품·유지보수까지 프로젝트 업무를 관리하는 플러그인",
+  "owner": {"name": "Agics-hsjeong"},
+  "plugins": [
+    {
+      "name": "project-lifecycle-agent",
+      "source": "./",
+      "description": "사업·개발·운영의 공통 프로세스와 프로젝트 기록 관리"
+    }
+  ]
+}

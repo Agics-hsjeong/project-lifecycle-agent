@@ -1,2 +1,81 @@
-# project-lifecycle-agent
-Codex·Claude Code용 프로젝트 라이프사이클 플러그인 — RFP 분석부터 제안, 설계, 개발, 납품, 유지보수까지
+# Project Lifecycle Agent
+
+RFP·제안요청서 또는 사업 아이디어를 받아 **제안 → 착수 → 기획·설계 → 디자인 → 퍼블리싱 → 구현 → 검증 → 배포 → 납품 → 유지보수**를 돕는 Codex·Claude Code용 플러그인입니다. 외주/SI와 자체 서비스를 모두 지원합니다.
+
+**사용자는 자료와 목표를 전달하고, 에이전트가 프로젝트 생성·분석·산출물 작성·점검·인수인계를 수행합니다.** 매 프로젝트마다 셸 명령을 입력하거나 JSON·CSV를 직접 편집하는 방식은 기본 사용 흐름이 아닙니다.
+
+현재 버전: **0.2.1**, 라이선스: [MIT](LICENSE). [최초 설치 안내](docs/INSTALL.md)를 참고하세요. 실제 호스트별 설치·검증 결과와 공개 상태는 [검증 기록](docs/VALIDATION.md)에 구분해 기록합니다.
+
+공개 저장소: [Agics-hsjeong/project-lifecycle-agent](https://github.com/Agics-hsjeong/project-lifecycle-agent).
+
+## 사용 예시
+
+설치·활성화한 플러그인을 프로젝트 작업 폴더에서 사용합니다.
+
+```text
+이 제안요청서로 A사 고객 포털 사업을 시작해줘.
+외주 사업으로 등록하고 요구사항·고객 질문·제안 준비 초안을 작성해줘.
+폴더 생성과 기록 관리는 네가 처리해줘.
+```
+
+```text
+자체 서비스 아이디어로 새 프로젝트를 시작해줘.
+대상 사용자는 소규모 학원이고 목표는 상담·수강 신청 관리야.
+사업 가설, MVP 범위, 성공 지표와 구현 계획을 정리해줘.
+```
+
+```text
+현재 프로젝트를 이어서 진행해줘.
+고객 답변을 반영하고 제안서를 갱신한 뒤 다음 작업을 정리해줘.
+```
+
+스킬 자동 선택이 되지 않으면 Codex의 `$project-lifecycle` 또는 Claude Code의 `/project-lifecycle-agent:project-lifecycle`로 명시적으로 호출합니다. 설치 상태와 호스트의 설정·지원 범위에 따라 로딩이 달라질 수 있습니다.
+
+## 에이전트가 처리하는 일
+
+| 업무 | 동작 |
+| --- | --- |
+| 시작 | 허용된 작업 공간에 프로젝트 생성, 원본 등록, 사업 유형·현재 단계 기록 |
+| 분석·제안 | 원문 근거가 있는 요구사항·질문·제안·일정·공수 초안 작성 |
+| 설계·개발 | 역할·완료 기준을 적용하고 REQ → 설계 → 코드 → 테스트 연결 |
+| 배포·납품 | 실제 검증·권한에 따라 릴리스·복구·인수·매뉴얼 관리 |
+| 유지보수 | 장애·변경·회귀·운영 점검과 릴리스 기록 |
+| 이어하기 | 같은 프로젝트의 파일·원장·HANDOFF.md를 대조해 작업 재개 |
+
+스킬은 진행 방법을 안내하고, 내부 도구는 반복적인 파일 작업과 구조 점검을 수행합니다. 가격·계약·검수·운영 권한에 관한 결정은 실제 사용자 지시와 증거를 따릅니다. 체크 통과만으로 사람의 승인이나 배포 성공을 만들지 않습니다.
+
+## 설치·배포 구조
+
+공통 프로세스·도구·스킬 하나를 유지하고, 제품별 설치 정보를 따로 둡니다. 패키지 전체를 설치하는 로컬 실행용 구성입니다.
+
+```text
+plugin.json                  portable manifest
+.codex-plugin/plugin.json    Codex 호환 설정
+.claude-plugin/              Claude Code 설정·marketplace
+skills/project-lifecycle/    공통 작업 스킬
+blueprint/                   11단계 프로세스·14종 산출물 양식
+tools/                       에이전트가 실행할 생성·점검·패키징 도구
+.agents/plugins/             Codex marketplace
+```
+
+최초 플러그인 등록·설치·활성화는 사용하는 호스트에서 수행합니다. GitHub에 코드를 올리는 것과 공식 플러그인 디렉터리에 등록하는 것은 별도 절차입니다. [플러그인 안내](docs/PLUGIN.md)에 설치 구조와 다른 확장 방식을 정리했습니다.
+
+공개 후 Claude Code의 최초 설치 명령은 `/plugin install project-lifecycle-agent --marketplace Agics-hsjeong/project-lifecycle-agent`입니다. 일상 업무는 자연어로 요청합니다.
+
+저장소 루트에 두 제품의 manifest와 marketplace를 함께 둡니다. GitHub 저장소를 설치 소스로 직접 등록할 수 있고, 배포 ZIP에도 같은 구성을 넣습니다. 공식 디렉터리 등록 여부와 공개 저장소 배포는 구분합니다.
+
+## 데이터와 실행 범위
+
+- 플러그인 코드와 고객 프로젝트를 분리합니다. `projects/`와 고객 자료는 공개·패키징 대상에서 제외합니다.
+- 프로젝트 지침은 AGENTS.md와 CLAUDE.md, 현재 상태는 project.json과 HANDOFF.md에 저장합니다.
+- 생성·점검 도구는 Python 3.10 이상과 표준 라이브러리만 사용합니다. 사용자에게 실행을 넘기지 않고 호스트 AI가 내부 실행합니다.
+- 모델을 별도로 호출하는 서버나 상시 실행 스케줄러는 포함하지 않습니다. 호스트 AI가 활성화된 세션에서 작업합니다.
+- MCP·공유 DB·대시보드는 다중 사용자와 조직 공유 상태가 필요할 때 확장할 수 있습니다.
+
+## 개발과 검증
+
+개발자용 테스트: `python -m unittest discover -s tests -v`
+
+배포 패키징: `python tools/package_plugin.py`
+
+초기 파일 기반 스타터팩의 직접 사용은 [연결 안내](docs/CONNECTIONS.md), 업무 예시는 [WALKTHROUGH](docs/WALKTHROUGH.md), 기본형 관리는 [MAINTENANCE](docs/MAINTENANCE.md), 변경은 [CHANGELOG](CHANGELOG.md)를 참고하세요.
