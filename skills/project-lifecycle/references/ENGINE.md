@@ -14,6 +14,9 @@ python <plugin-root>/tools/starter.py advance <project>
 python <plugin-root>/tools/starter.py rewind <project> --to planning --reason <reason> --evidence reviews/<change>.md
 python <plugin-root>/tools/starter.py recover <project>
 python <plugin-root>/tools/starter.py proposal-setup <project>
+python <plugin-root>/tools/starter.py template-setup <project>
+python <plugin-root>/tools/starter.py template-scan <project> --source <reference-folder>
+python <plugin-root>/tools/starter.py template-prepare <project> --kind qualitative --output working/templates/draft.docx
 ```
 
 새 엔진 명령은 JSON을 반환한다. 기존 init/status/check/context는 --json을 지원한다.
@@ -53,6 +56,7 @@ python <plugin-root>/tools/starter.py proposal-setup <project>
 - done 작업은 실제 evidence_refs가 필요하다. 파일 참조는 프로젝트 내부의 `/` 상대 경로다. 외부 산출물은 로컬 명세에 URL·버전·확인일을 기록한다.
 - review는 현재·이전 단계만 가능하다. 이전 검토를 재확인할 때 `--stage`를 지정한다. 검토 근거 파일을 수정하면 이전 스냅샷도 무효가 되므로 새 파일에 재검토 내용을 기록한다.
 - apply의 `proposal`은 정성제안·발표 패키지 설정과 평가/슬라이드 목록을 갱신한다. 실제 형식과 필드는 [제안 규약](PROPOSAL.md)을 따른다. 기존 프로젝트는 proposal-setup을 먼저 실행한다.
+- template_selection/template_profiles/template_checks는 [참고 템플릿 규약](REFERENCE-TEMPLATES.md)에 따라 선택·분석·제출본 비교 검수를 기록한다. template-scan은 파일별로 보존하며 일부 등록 실패는 errors 목록과 종료 코드 2로 보고한다.
 
 ## 결과와 복구
 

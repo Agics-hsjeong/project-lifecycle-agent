@@ -36,9 +36,10 @@ class PluginTests(unittest.TestCase):
                 prefix = "project-lifecycle-agent/"
                 for required in ("plugin.json", ".codex-plugin/plugin.json", ".claude-plugin/plugin.json",
                                  ".claude-plugin/marketplace.json", ".agents/plugins/marketplace.json",
-                                 "skills/project-lifecycle/SKILL.md", "tools/starter.py", "blueprint/project.json"):
+                                 "skills/project-lifecycle/SKILL.md", "tools/starter.py", "tools/reference_templates.py", "tools/template_analysis.py", "blueprint/project.json", "blueprint/templates/qualitative/README.md"):
                     self.assertIn(prefix + required, names)
                 self.assertFalse(any("/projects/" in name or "/.test-output/" in name or "/__pycache__/" in name for name in names))
+                self.assertFalse(any(name.startswith(prefix + "reference-templates/") for name in names))
                 catalog = json.loads(archive.read(prefix + ".agents/plugins/marketplace.json"))
                 self.assertEqual(catalog["plugins"][0]["source"]["path"], "./")
                 self.assertIsNone(archive.testzip())

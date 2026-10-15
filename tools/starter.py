@@ -340,6 +340,8 @@ def main(argv=None):
         if args.command in lifecycle.COMMANDS:
             result = lifecycle.run_args(args)
             print(json.dumps(result, ensure_ascii=False, indent=2))
+            if args.command == "template-scan" and result["errors"]:
+                return 2
             return 1 if args.command == "doctor" and not result["ready"] else 0
         if args.command == "init":
             parts = [part.lower() for part in args.workspace.resolve().parts]

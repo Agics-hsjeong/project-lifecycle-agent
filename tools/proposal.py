@@ -176,4 +176,6 @@ def check(root, data, tables):
             core.local_file(root, relative)
         except ValueError as exc:
             issues.append(f"제안 패키지/{relative}: {exc}")
+    from tools import reference_templates
+    issues.extend(reference_templates.check(root, profile))
     return issues

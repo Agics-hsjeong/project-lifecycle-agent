@@ -10,12 +10,13 @@ import uuid
 
 from tools import starter as core
 from tools import proposal
+from tools import reference_templates
 from tools.intake import hash_file, make_record
 from tools.storage import commit, confined, digest, json_bytes, lock, recover
 
 IDS = {"requirements": ("requirement_id", "REQ"), "deliverables": ("deliverable_id", "DEL"),
        "tasks": ("task_id", "TASK"), "risks": ("risk_id", "RISK"), "reviews": ("review_id", "REV")}
-COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup"}
+COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup", "template-scan", "template-setup", "template-prepare"}
 
 
 class GateError(ValueError):
@@ -109,7 +110,7 @@ def validate_tables(root, tables):
 def apply_patch(folder, payload, actor="agent"):
     """Upsert known fields. Review decisions and stage changes have separate commands."""
     root, _ = core.load_project(folder)
-    if not isinstance(payload, dict) or set(payload) - {"project", "requirements", "tasks", "deliverables", "risks", "handoff", "expected_revision", "proposal"}:
+    if not isinstance(payload, dict) or set(payload) - {"project", "requirements", "tasks", "deliverables", "risks", "handoff", "expected_revision", "proposal", "template_selection", "template_profiles", "template_checks"}:
         raise ValueError("지원하지 않는 변경 항목입니다.")
     with lock(root):
         root, data, tables = bundle(root)
@@ -172,6 +173,8 @@ def apply_patch(folder, payload, actor="agent"):
                 assigned[name].append(identifier)
             changes[f"registers/{name}.csv"] = table_bytes(root, name, rows)
         validate_tables(root, tables)
+        if any(key in payload for key in ("template_selection", "template_profiles", "template_checks")):
+            changes.update(reference_templates.patch_changes(root, payload))
         if "proposal" in payload:
             if not proposal.enabled(data):
                 raise ValueError("기존 프로젝트는 proposal-setup으로 제안 패키지를 먼저 추가하세요.")
@@ -267,6 +270,7 @@ def fingerprint(root, stage, evidence, *, tables=None):
         proposal.validate(profile)
         files.add(proposal.PROFILE)
         files.update(proposal.files(profile))
+        files.update(reference_templates.review_files(root, profile))
     hashes = {ref: hash_file(core.local_file(root, ref)) for ref in sorted(files)}
     scope = {key: data.get(key) for key in ("business_type", "methodology", "objective", "scope_baseline")}
     body = {"stage": stage, "scope": scope, "requirements": sorted(requirements, key=lambda item: item["requirement_id"]),
@@ -449,6 +453,7 @@ def inspect_project(folder):
     return {"project": data, "path": str(root), "revision": history[-1]["revision"] if history else None,
             "stage": stage, "deliverables": [row for row in tables["deliverables"] if row["deliverable_id"] in core.required_deliverables(data, stage)],
             "proposal_package": {"enabled": proposal.enabled(data), "profile": proposal.PROFILE if proposal.enabled(data) else None},
+            "reference_templates": reference_templates.overview(root),
             "open_tasks": [row for row in tables["tasks"] if row["status"] != "done"], "inputs": inputs,
             "read_files": ["AGENTS.md", "project.json", "HANDOFF.md", "process/RULES.md", "process/WORKFLOW.md", "process/ROLES.md"],
             "issues": issues, "gate_issues": prior,
@@ -475,7 +480,7 @@ def doctor(folder=None):
 
 def add_parsers(commands):
     for name in COMMANDS:
-        parser = commands.add_parser(name, help={"apply": "원장·프로젝트·인수인계 갱신", "review": "근거와 검토 스냅샷 기록", "advance": "완료 기준 확인 후 다음 단계", "rewind": "변경 근거로 이전 단계 재검토", "ingest": "입력 원본 보존·추출", "discover": "작업 공간의 프로젝트 검색", "inspect": "이어하기 상태와 다음 행동", "doctor": "실행 환경 점검", "recover": "미완료 기록 복구", "proposal-setup": "기존 프로젝트에 정성제안·발표 패키지 추가"}[name])
+        parser = commands.add_parser(name, help={"apply": "원장·프로젝트·인수인계 갱신", "review": "근거와 검토 스냅샷 기록", "advance": "완료 기준 확인 후 다음 단계", "rewind": "변경 근거로 이전 단계 재검토", "ingest": "입력 원본 보존·추출", "discover": "작업 공간의 프로젝트 검색", "inspect": "이어하기 상태와 다음 행동", "doctor": "실행 환경 점검", "recover": "미완료 기록 복구", "proposal-setup": "기존 프로젝트에 정성제안·발표 패키지 추가", "template-scan": "참고 폴더 등록·구조 분석", "template-setup": "참고 템플릿 폴더 준비", "template-prepare": "원본을 보존한 편집 작업 사본 생성"}[name])
         if name == "discover":
             parser.add_argument("workspace", nargs="?", default=str(Path.cwd()))
         elif name == "doctor":
@@ -486,6 +491,11 @@ def add_parsers(commands):
             parser.add_argument("--file", type=Path, required=True)
         if name == "ingest":
             parser.add_argument("source", type=Path)
+        if name == "template-scan":
+            parser.add_argument("--source", type=Path, help="qualitative/presentation 폴더를 가진 회사 참고자료 폴더")
+        if name == "template-prepare":
+            parser.add_argument("--kind", choices=list(reference_templates.KINDS), required=True)
+            parser.add_argument("--output", required=True)
         if name == "review":
             parser.add_argument("--reviewer", required=True)
             parser.add_argument("--evidence", required=True)
@@ -499,12 +509,18 @@ def add_parsers(commands):
             parser.add_argument("--evidence", required=True)
         if name == "recover":
             parser.add_argument("--abandoned", action="store_true")
-        if name in {"apply", "ingest", "advance", "rewind", "proposal-setup"}:
+        if name in {"apply", "ingest", "advance", "rewind", "proposal-setup", "template-scan", "template-setup", "template-prepare"}:
             parser.add_argument("--actor", default="agent")
         parser.add_argument("--json", action="store_true", help="항상 구조화된 JSON 결과를 반환합니다.")
 
 
 def run_args(args):
+    if args.command == "template-scan":
+        return reference_templates.scan(args.project, args.source, args.actor)
+    if args.command == "template-setup":
+        return reference_templates.setup(args.project, args.actor)
+    if args.command == "template-prepare":
+        return reference_templates.prepare(args.project, args.kind, args.output, args.actor)
     if args.command == "proposal-setup":
         return setup_proposal(args.project, args.actor)
     if args.command == "apply":
