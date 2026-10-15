@@ -8,6 +8,8 @@ Windows/Python 3.12에서 46개 자동 테스트를 통과했습니다. 기존 1
 
 테스트의 DOCX/PPTX는 기본 컨테이너 검사 전용 가상 파일입니다. 실제 고객 문서의 렌더링·시각 품질·내용 품질을 검증한 파일이 아닙니다. 새 스킬은 실제 작성 시 호스트의 문서/발표 제작 도구로 제출본 생성과 전 페이지/슬라이드 렌더링을 수행하도록 안내합니다. 고객 RFP가 아직 없으므로 실제 정성제안서나 발표자료를 고객 산출물로 생성하지 않았습니다.
 
+[GitHub Actions 0.4 검증](https://github.com/Agics-hsjeong/project-lifecycle-agent/actions/runs/38767984479)에서 Windows/Linux × Python 3.10/3.12 네 조합의 46개 테스트·패키징이 모두 성공했습니다. 대상 커밋은 f8e8555f2cec53672bc3aa374e0227c80ef9f56a입니다. 공식 스킬 검증과 Claude Code marketplace/plugin strict 검증도 통과했습니다. 기존 사용자 설치는 두 호스트의 업데이트 명령으로 v0.4.0, enabled=true로 갱신했고 실제 설치본의 doctor도 ready=true를 확인했습니다. 캐시 파일을 직접 수정하지 않았습니다. 적용에는 새 Codex 채팅/Claude Code 세션이 필요합니다.
+
 ## 0.3 실행 엔진 검증
 
 Windows/Python 3.12에서 36개 자동 테스트를 통과했습니다. 가상 프로젝트가 discovery부터 maintenance까지 실제 원장 갱신·검토 스냅샷·단계 이동을 거치고 구현 단계로 되돌아오는 통합 시나리오를 포함합니다.
