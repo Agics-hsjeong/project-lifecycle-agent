@@ -168,6 +168,57 @@ def setup(folder, actor="agent"):
         return {"unchanged": False, "revision": revision, "folders": [f"templates/{kind}" for kind in KINDS]}
 
 
+def onboard(folder, actor="agent"):
+    """Prepare a customer's project and report the agent's work, not a user test checklist."""
+    from tools import lifecycle as engine, starter as core
+    root, _ = core.load_project(folder)
+    environment = engine.doctor(root)
+    if not environment["ready"]:
+        return {"project": str(root), "environment": environment, "verification_owner": "agent",
+                "agent_next_action": "diagnose_environment_or_recover", "roles": {}}
+    setup_result = setup(root, actor)
+    state = overview(root)
+    roles = {}
+    for kind in KINDS:
+        candidates = [item for item in state["templates"] if item["kind"] == kind]
+        pending = [item for item in state["pending"] if item["kind"] == kind]
+        selected = state["selection"][kind]
+        if pending:
+            action = "register_and_analyze"
+        elif not candidates:
+            action = "accept_user_reference_or_continue_without_reference"
+        elif not selected:
+            action = "select_requested_style"
+        else:
+            record = next((item for item in candidates if item["id"] == selected), None)
+            profile = read_json(root, record["profile_ref"], {}) if record else {}
+            if not record:
+                action = "select_requested_style"
+            else:
+                try:
+                    source_valid = hash_file(core.local_file(root, record["path"])) == record["sha256"]
+                except (ValueError, OSError):
+                    source_valid = False
+                if not source_valid:
+                    action = "repair_reference_integrity"
+                else:
+                    try:
+                        analysis_valid = (isinstance(profile, dict) and profile.get("status") == "analyzed" and
+                            profile.get("source_sha256") == record["sha256"] and
+                            all(not core.missing(profile.get(key)) for key in TEXT_FIELDS) and
+                            bool(profile.get("visual_refs")) and hashes(root, profile["visual_refs"]) == profile.get("visual_hashes"))
+                    except (ValueError, OSError, TypeError):
+                        analysis_valid = False
+                    action = "generate_and_compare" if analysis_valid else "analyze_reference"
+        roles[kind] = {"folder": str(confined(root, f"templates/{kind}")), "selected": selected,
+                       "candidates": [{"id": item["id"], "name": item["name"]} for item in candidates],
+                       "pending": pending, "agent_next_action": action}
+    return {"project": str(root), "environment": environment, "setup": setup_result, "roles": roles,
+            "unsupported": state["unsupported"], "verification_owner": "agent",
+            "user_inputs": ["reference_files_when_using_a_reference", "style_choice_if_ambiguous", "business_decisions"],
+            "agent_work": ["environment_check", "registration", "analysis", "file_generation", "render_and_compare", "record_updates"]}
+
+
 def patch_changes(root, payload):
     from tools import starter as core
     catalog = {item["id"]: item for item in library(root)["templates"]}

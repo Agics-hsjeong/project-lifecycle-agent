@@ -342,6 +342,8 @@ def main(argv=None):
             print(json.dumps(result, ensure_ascii=False, indent=2))
             if args.command == "template-scan" and result["errors"]:
                 return 2
+            if args.command == "template-onboard" and not result["environment"]["ready"]:
+                return 1
             return 1 if args.command == "doctor" and not result["ready"] else 0
         if args.command == "init":
             parts = [part.lower() for part in args.workspace.resolve().parts]

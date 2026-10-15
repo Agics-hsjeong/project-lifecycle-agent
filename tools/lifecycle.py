@@ -16,7 +16,7 @@ from tools.storage import commit, confined, digest, json_bytes, lock, recover
 
 IDS = {"requirements": ("requirement_id", "REQ"), "deliverables": ("deliverable_id", "DEL"),
        "tasks": ("task_id", "TASK"), "risks": ("risk_id", "RISK"), "reviews": ("review_id", "REV")}
-COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup", "template-scan", "template-setup", "template-prepare"}
+COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup", "template-scan", "template-setup", "template-prepare", "template-onboard"}
 
 
 class GateError(ValueError):
@@ -480,6 +480,12 @@ def doctor(folder=None):
 
 def add_parsers(commands):
     for name in COMMANDS:
+        if name == "template-onboard":
+            parser = commands.add_parser(name, help="사용자 프로젝트의 참고 폴더·환경·다음 에이전트 작업 준비")
+            parser.add_argument("project")
+            parser.add_argument("--actor", default="agent")
+            parser.add_argument("--json", action="store_true")
+            continue
         parser = commands.add_parser(name, help={"apply": "원장·프로젝트·인수인계 갱신", "review": "근거와 검토 스냅샷 기록", "advance": "완료 기준 확인 후 다음 단계", "rewind": "변경 근거로 이전 단계 재검토", "ingest": "입력 원본 보존·추출", "discover": "작업 공간의 프로젝트 검색", "inspect": "이어하기 상태와 다음 행동", "doctor": "실행 환경 점검", "recover": "미완료 기록 복구", "proposal-setup": "기존 프로젝트에 정성제안·발표 패키지 추가", "template-scan": "참고 폴더 등록·구조 분석", "template-setup": "참고 템플릿 폴더 준비", "template-prepare": "원본을 보존한 편집 작업 사본 생성"}[name])
         if name == "discover":
             parser.add_argument("workspace", nargs="?", default=str(Path.cwd()))
@@ -515,6 +521,8 @@ def add_parsers(commands):
 
 
 def run_args(args):
+    if args.command == "template-onboard":
+        return reference_templates.onboard(args.project, args.actor)
     if args.command == "template-scan":
         return reference_templates.scan(args.project, args.source, args.actor)
     if args.command == "template-setup":

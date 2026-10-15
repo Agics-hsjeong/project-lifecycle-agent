@@ -192,5 +192,41 @@ class ReferenceTemplateTests(unittest.TestCase):
         self.assertEqual((self.project / "project.json").read_bytes(), original)
 
 
+    def test_onboarding_uses_customer_folders_and_needs_no_reference_to_start(self):
+        result = refs.onboard(self.project)
+        self.assertTrue(result["environment"]["ready"])
+        self.assertEqual(result["verification_owner"], "agent")
+        for kind, role in result["roles"].items():
+            folder = Path(role["folder"])
+            self.assertTrue(folder.resolve().is_relative_to(self.project))
+            self.assertEqual(folder, self.project / "templates" / kind)
+            self.assertTrue((folder / "README.md").is_file())
+            self.assertEqual(role["agent_next_action"], "accept_user_reference_or_continue_without_reference")
+        self.assertTrue(refs.onboard(self.project)["setup"]["unchanged"])
+
+    def test_onboarding_dispatches_work_and_detects_stale_analysis(self):
+        self.source()
+        self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "register_and_analyze")
+        record = refs.scan(self.project)["imported"][0]
+        self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "analyze_reference")
+        lifecycle.apply_patch(self.project, {"template_profiles": [self.profile(record["id"])]})
+        self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "generate_and_compare")
+        (self.project / "qa/reference.png").write_bytes(PNG + b"changed")
+        self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "analyze_reference")
+        (self.project / record["path"]).write_bytes(b"corrupted original")
+        self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "repair_reference_integrity")
+
+    def test_onboarding_reports_agent_recovery_without_overwriting_project(self):
+        sentinel = self.project / "templates/qualitative/README.md"
+        sentinel.write_text("고객 안내 보존", encoding="utf-8")
+        state = self.project / "state"
+        state.mkdir(exist_ok=True)
+        (state / "pending.json").write_text('{"schema_version": 1, "entries": []}', encoding="utf-8")
+        result = refs.onboard(self.project)
+        self.assertFalse(result["environment"]["ready"])
+        self.assertEqual(result["agent_next_action"], "diagnose_environment_or_recover")
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "고객 안내 보존")
+
+
 if __name__ == "__main__":
     unittest.main()

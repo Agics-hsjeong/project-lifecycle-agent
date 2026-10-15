@@ -15,6 +15,7 @@ python <plugin-root>/tools/starter.py rewind <project> --to planning --reason <r
 python <plugin-root>/tools/starter.py recover <project>
 python <plugin-root>/tools/starter.py proposal-setup <project>
 python <plugin-root>/tools/starter.py template-setup <project>
+python <plugin-root>/tools/starter.py template-onboard <project>
 python <plugin-root>/tools/starter.py template-scan <project> --source <reference-folder>
 python <plugin-root>/tools/starter.py template-prepare <project> --kind qualitative --output working/templates/draft.docx
 ```
