@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 BLUEPRINT = ROOT / "blueprint"
 STAGES = {
     "discovery": ("사업 검토", ["DEL-001"]),
@@ -49,14 +51,16 @@ def missing(value):
 
 def load_project(folder):
     folder = Path(folder).resolve()
+    if (folder / ".initializing").exists():
+        raise ValueError("프로젝트 생성 중입니다. 완료된 뒤 다시 읽으세요.")
     data = json.loads((folder / "project.json").read_text(encoding="utf-8-sig"))
     if not isinstance(data, dict) or data.get("schema_version") != 1:
         raise ValueError("지원하지 않는 project.json 구조/스키마입니다.")
-    if data.get("business_type") not in {"si", "product"}:
+    if not isinstance(data.get("business_type"), str) or data["business_type"] not in {"si", "product"}:
         raise ValueError("business_type은 si 또는 product여야 합니다.")
-    if data.get("methodology") not in {"hybrid", "waterfall", "agile"}:
+    if not isinstance(data.get("methodology"), str) or data["methodology"] not in {"hybrid", "waterfall", "agile"}:
         raise ValueError("methodology는 hybrid, waterfall, agile 중 하나여야 합니다.")
-    if data.get("current_stage") not in STAGES:
+    if not isinstance(data.get("current_stage"), str) or data["current_stage"] not in STAGES:
         raise ValueError("알 수 없는 current_stage입니다.")
     return folder, data
 
@@ -65,8 +69,9 @@ def read_table(folder, name):
     path = folder / "registers" / (name + ".csv")
     with path.open(encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle)
-        if reader.fieldnames != HEADERS[name].split(","):
-            raise ValueError(f"{path.name}: 헤더/열 순서가 기본형과 다릅니다.")
+        fields = reader.fieldnames or []
+        if len(set(fields)) != len(fields) or not set(HEADERS[name].split(",")).issubset(fields):
+            raise ValueError(f"{path.name}: 필수 헤더 누락 또는 중복입니다.")
         rows = []
         for line, row in enumerate(reader, 2):
             if None in row or any(value is None for value in row.values()):
@@ -103,31 +108,45 @@ def init_project(parent, slug, name, business_type, rfp=None):
     parent.mkdir(parents=True, exist_ok=True)
     # Exclusive creation: never merge or overwrite an existing customer project.
     target.mkdir(exist_ok=False)
-    shutil.copytree(BLUEPRINT, target, dirs_exist_ok=True)
-    data = json.loads((target / "project.json").read_text(encoding="utf-8"))
-    data.update(project_id=slug, name=name.strip(), business_type=business_type,
-                created_at=now(), updated_at=now())
-    (target / "project.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if source:
-        input_dir = target / "inputs" / "rfp"
-        input_dir.mkdir()
-        copied = input_dir / source.name
-        shutil.copy2(source, copied)
-        title = source.name.replace("|", "\\|")
-        readme = target / "inputs" / "README.md"
-        with readme.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n\n자동 등록 입력: `{copied.relative_to(target).as_posix()}`\n")
-            handle.write(f"\n- 자료명: {title}\n- 원본 위치: `{source}`\n- 등록 일시: {now()}\n- 원문 버전·출처·사용 범위: 확인 필요\n")
+    marker = target / ".initializing"
+    marker.write_text(now(), encoding="utf-8")
+    try:
+        shutil.copytree(BLUEPRINT, target, dirs_exist_ok=True)
+        data = json.loads((target / "project.json").read_text(encoding="utf-8"))
+        data.update(project_id=slug, name=name.strip(), business_type=business_type,
+                    created_at=now(), updated_at=now())
+        (target / "project.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if source:
+            input_dir = target / "inputs" / "rfp"
+            input_dir.mkdir()
+            copied = input_dir / source.name
+            shutil.copy2(source, copied)
+            title = source.name.replace("|", "\\|")
+            readme = target / "inputs" / "README.md"
+            with readme.open("a", encoding="utf-8") as handle:
+                handle.write(f"\n\n자동 등록 입력: `{copied.relative_to(target).as_posix()}`\n")
+                handle.write(f"\n- 자료명: {title}\n- 원본 위치: `{source}`\n- 등록 일시: {now()}\n- 원문 버전·출처·사용 범위: 확인 필요\n")
+            from tools.intake import make_record
+            record, extracted = make_record(copied, "INPUT-001", copied.relative_to(target).as_posix(), now())
+            (target / "inputs/manifest.json").write_text(json.dumps({"schema_version": 1, "inputs": [record]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            if extracted is not None:
+                (target / record["extraction"]["path"]).write_text(extracted, encoding="utf-8")
+        marker.unlink()
+    except BaseException:
+        # Only remove the new directory owned by this invocation; never an existing project.
+        if not target.is_symlink() and target.resolve().is_relative_to(parent) and target.resolve() != parent:
+            shutil.rmtree(target)
+        raise
     return target
 
 
-def check_project(folder, selected_stage=None):
+def check_project(folder, selected_stage=None, *, tables_override=None, include_review=True, check_snapshots=True):
     folder, data = load_project(folder)
     stage = selected_stage or data["current_stage"]
     if stage not in STAGES:
         raise ValueError("알 수 없는 단계입니다.")
     issues = []
-    tables = {name: read_table(folder, name) for name in HEADERS}
+    tables = tables_override if tables_override is not None else {name: read_table(folder, name) for name in HEADERS}
     requirements, deliverables = tables["requirements"], tables["deliverables"]
     req_ids = {row["requirement_id"] for row in requirements}
     del_ids = {row["deliverable_id"] for row in deliverables}
@@ -194,6 +213,7 @@ def check_project(folder, selected_stage=None):
                     issues.append(f"{rid}: 납품 연결 {identifier}가 approved 상태가 아님")
                 if rid not in split_refs(linked["requirement_ids"]):
                     issues.append(f"{rid}: {identifier}의 역방향 요구사항 연결 누락")
+                files(f"{rid}/{identifier}", linked["path"], required=True, inspect_template=True)
 
     required = set(STAGES[stage][1])
     for identifier in sorted(required - del_ids):
@@ -221,7 +241,7 @@ def check_project(folder, selected_stage=None):
         files(did, row["path"], required=True, inspect_template=True)
 
     reviews = []
-    for row in tables["reviews"]:
+    for row in tables["reviews"] if include_review else []:
         if row["stage"] not in STAGES or row["decision"] not in {"approved", "rejected"}:
             issues.append(f"{row['review_id']}: 잘못된 검토 단계/결정")
         if row["stage"] != stage:
@@ -238,19 +258,26 @@ def check_project(folder, selected_stage=None):
         files(row["review_id"], row["evidence_ref"], required=True, inspect_template=True)
         if missing(row["notes"]):
             issues.append(f"{row['review_id']}: 검토 내용/적용 제외 근거 누락")
-    if not reviews:
+    if include_review and not reviews:
         issues.append(f"{stage}: 책임자 검토 기록 없음")
-    elif max(reviews, key=lambda item: item[0])[1]["decision"] != "approved":
+    elif include_review and max(reviews, key=lambda item: item[0])[1]["decision"] != "approved":
         issues.append(f"{stage}: 최신 검토 결정이 approved가 아님")
+    if include_review and reviews:
+        latest = max(item[0] for item in reviews)
+        if sum(stamp == latest for stamp, _ in reviews) > 1:
+            issues.append(f"{stage}: 같은 시각의 최신 검토가 여러 개입니다.")
     for row in tables["tasks"]:
         if row["status"] not in {"todo", "doing", "blocked", "done"}:
             issues.append(f"{row['task_id']}: 잘못된 작업 상태")
         for rid in split_refs(row["requirement_ids"]):
             if rid not in req_ids:
                 issues.append(f"{row['task_id']}: 없는 요구사항 ID {rid}")
-        files(row["task_id"], row["evidence_refs"])
+        files(row["task_id"], row["evidence_refs"], required=row["status"] == "done")
     for ref in ("AGENTS.md", "CLAUDE.md", "HANDOFF.md", "process/RULES.md", "process/WORKFLOW.md", "process/ROLES.md"):
         files("공통 파일", ref, required=True)
+    if include_review and check_snapshots and (folder / "state/reviews").is_dir():
+        from tools.lifecycle import stale_reviews
+        issues.extend(stale_reviews(folder, stage, strict=False))
     return data, stage, issues
 
 
@@ -279,6 +306,7 @@ def print_context(folder):
 
 
 def main(argv=None):
+    from tools import lifecycle
     parser = argparse.ArgumentParser(description="사업·프로젝트 에이전트 스타터팩 관리")
     commands = parser.add_subparsers(dest="command", required=True)
     create = commands.add_parser("init", help="새 프로젝트 생성 (덮어쓰기 금지)")
@@ -294,12 +322,29 @@ def main(argv=None):
     check.add_argument("--stage", choices=list(STAGES))
     context = commands.add_parser("context", help="AI에게 전달할 읽기 목록")
     context.add_argument("project")
+    for command in (create, status, check, context):
+        command.add_argument("--json", action="store_true", help="구조화된 결과 출력")
+    lifecycle.add_parsers(commands)
     args = parser.parse_args(argv)
     try:
+        if args.command in lifecycle.COMMANDS:
+            result = lifecycle.run_args(args)
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return 1 if args.command == "doctor" and not result["ready"] else 0
         if args.command == "init":
+            parts = [part.lower() for part in args.workspace.resolve().parts]
+            if args.workspace.resolve() == ROOT or any(parts[index:index + 3] in ([".codex", "plugins", "cache"], [".claude", "plugins", "cache"]) for index in range(len(parts) - 2)):
+                raise ValueError("플러그인 소스·캐시와 분리된 사용자 작업 공간을 지정하세요.")
             target = init_project(args.workspace / "projects", args.slug, args.name, args.type, args.rfp)
-            print(f"생성 완료: {target}\nproject.json의 담당자·목표·범위를 입력하고 inputs/에 원본 자료를 추가하세요.")
+            if args.json:
+                print(json.dumps({"path": str(target), "project_id": args.slug, "stage": "discovery"}, ensure_ascii=False))
+            else:
+                print(f"생성 완료: {target}\n다음: 입력을 분석하고 apply로 프로젝트 정보와 요구사항 원장을 갱신하세요.")
         elif args.command == "status":
+            if args.json:
+                selected = [lifecycle.inspect_project(args.project)] if args.project else lifecycle.discover(Path.cwd())
+                print(json.dumps({"projects": selected}, ensure_ascii=False, indent=2))
+                return 0
             if args.project:
                 print_status(args.project)
             else:
@@ -315,17 +360,26 @@ def main(argv=None):
                         failed = True
                 return 2 if failed else 0
         elif args.command == "context":
-            print_context(args.project)
+            if args.json:
+                print(json.dumps(lifecycle.inspect_project(args.project), ensure_ascii=False, indent=2))
+            else:
+                print_context(args.project)
         else:
             data, stage, issues = check_project(args.project, args.stage)
+            if args.json:
+                print(json.dumps({"project_id": data["project_id"], "stage": stage, "ready": not issues, "issues": issues}, ensure_ascii=False, indent=2))
+                return 1 if issues else 0
             print(f"{data['name']} / {stage}: 구조 점검 {'미완료' if issues else '통과'}")
             for issue in issues:
                 print(f"- {issue}")
             print("내용·실행 결과·승인 진위의 검증은 책임자 검토와 실제 증거 확인이 필요합니다.")
             return 1 if issues else 0
-    except (ValueError, OSError) as exc:
-        print(f"오류: {exc}", file=sys.stderr)
-        return 2
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        if args.command in lifecycle.COMMANDS or getattr(args, "json", False):
+            print(json.dumps({"error": str(exc), "issues": getattr(exc, "issues", []), "kind": "gate_blocked" if isinstance(exc, lifecycle.GateError) else "invalid_request"}, ensure_ascii=False), file=sys.stderr)
+        else:
+            print(f"오류: {exc}", file=sys.stderr)
+        return 1 if isinstance(exc, lifecycle.GateError) else 2
     return 0
 
 

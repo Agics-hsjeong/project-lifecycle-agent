@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "project-lifecycle-agent",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "license": "MIT",
   "description": "RFP와 사업 아이디어에서 제안·설계·개발·납품·유지보수까지 프로젝트 프로세스를 관리합니다.",
   "extensions": {
