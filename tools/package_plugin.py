@@ -19,7 +19,7 @@ def package(output=None):
         raise ValueError("호스트별 플러그인 이름·버전이 다릅니다.")
     if json.loads((ROOT / "blueprint/project.json").read_text(encoding="utf-8"))["starter_version"] != metadata["version"]:
         raise ValueError("기본형과 플러그인 버전이 다릅니다.")
-    for resource in ("tools/starter.py", "tools/lifecycle.py", "tools/storage.py", "tools/intake.py", "skills/project-lifecycle/SKILL.md"):
+    for resource in ("tools/starter.py", "tools/lifecycle.py", "tools/storage.py", "tools/intake.py", "tools/proposal.py", "blueprint/proposal/package.json", "skills/project-lifecycle/SKILL.md"):
         if not (ROOT / resource).is_file():
             raise ValueError(f"필수 리소스 누락: {resource}")
     destination = Path(output) if output else ROOT / "dist" / f"{metadata['name']}-v{metadata['version']}.zip"

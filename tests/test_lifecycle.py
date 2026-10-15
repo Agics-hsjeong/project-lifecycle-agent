@@ -14,6 +14,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from tools import intake, lifecycle as engine, starter, storage
+from proposal_fixtures import complete_package
 
 
 class LifecycleTests(unittest.TestCase):
@@ -40,6 +41,7 @@ class LifecycleTests(unittest.TestCase):
         self.write("docs/design.md")
         self.write("src/example.py", "value = 1\n")
         self.write("tests/result.md", "가상 회귀 결과: 통과")
+        complete_package(self.project)
         return engine.apply_patch(self.project, {
             "project": {"project_manager": "가상 PM", "client_or_product_owner": "가상 담당자",
                         "objective": "신청 조회", "scope_baseline": "REQ-001"},

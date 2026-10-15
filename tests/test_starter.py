@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from proposal_fixtures import complete_package
 
 spec = importlib.util.spec_from_file_location("starter", Path(__file__).resolve().parents[1] / "tools" / "starter.py")
 starter = importlib.util.module_from_spec(spec)
@@ -53,6 +54,7 @@ class StarterTests(unittest.TestCase):
             "reviewed_at": "2026-10-15T10:00:00+09:00", "evidence_ref": "docs/evidence.md",
             "notes": "테스트에서만 사용하는 검토 기록"
         }])
+        complete_package(self.project)
 
     def issues(self, stage=None):
         return starter.check_project(self.project, stage)[2]
@@ -61,7 +63,7 @@ class StarterTests(unittest.TestCase):
         second = starter.init_project(self.parent, "test-product", "제품", "product")
         self.assertEqual(starter.load_project(second)[1]["business_type"], "product")
         self.assertIn("@AGENTS.md", (second / "CLAUDE.md").read_text(encoding="utf-8"))
-        self.assertEqual(len(starter.read_table(second, "deliverables")), 14)
+        self.assertEqual(len(starter.read_table(second, "deliverables")), 18)
 
     def test_never_overwrite_existing_project(self):
         sentinel = self.project / "customer.txt"

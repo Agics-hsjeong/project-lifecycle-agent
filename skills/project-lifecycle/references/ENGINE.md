@@ -13,6 +13,7 @@ python <plugin-root>/tools/starter.py review <project> --reviewer <person> --evi
 python <plugin-root>/tools/starter.py advance <project>
 python <plugin-root>/tools/starter.py rewind <project> --to planning --reason <reason> --evidence reviews/<change>.md
 python <plugin-root>/tools/starter.py recover <project>
+python <plugin-root>/tools/starter.py proposal-setup <project>
 ```
 
 새 엔진 명령은 JSON을 반환한다. 기존 init/status/check/context는 --json을 지원한다.
@@ -51,6 +52,7 @@ python <plugin-root>/tools/starter.py recover <project>
 - approved는 apply에서 지정할 수 없다. review가 검사 후 해당 단계 필수 산출물을 승인한다. 이미 승인된 행의 편집은 in_review로 되돌린다.
 - done 작업은 실제 evidence_refs가 필요하다. 파일 참조는 프로젝트 내부의 `/` 상대 경로다. 외부 산출물은 로컬 명세에 URL·버전·확인일을 기록한다.
 - review는 현재·이전 단계만 가능하다. 이전 검토를 재확인할 때 `--stage`를 지정한다. 검토 근거 파일을 수정하면 이전 스냅샷도 무효가 되므로 새 파일에 재검토 내용을 기록한다.
+- apply의 `proposal`은 정성제안·발표 패키지 설정과 평가/슬라이드 목록을 갱신한다. 실제 형식과 필드는 [제안 규약](PROPOSAL.md)을 따른다. 기존 프로젝트는 proposal-setup을 먼저 실행한다.
 
 ## 결과와 복구
 

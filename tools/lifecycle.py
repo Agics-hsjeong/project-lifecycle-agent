@@ -9,12 +9,13 @@ import sys
 import uuid
 
 from tools import starter as core
+from tools import proposal
 from tools.intake import hash_file, make_record
 from tools.storage import commit, confined, digest, json_bytes, lock, recover
 
 IDS = {"requirements": ("requirement_id", "REQ"), "deliverables": ("deliverable_id", "DEL"),
        "tasks": ("task_id", "TASK"), "risks": ("risk_id", "RISK"), "reviews": ("review_id", "REV")}
-COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover"}
+COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup"}
 
 
 class GateError(ValueError):
@@ -108,7 +109,7 @@ def validate_tables(root, tables):
 def apply_patch(folder, payload, actor="agent"):
     """Upsert known fields. Review decisions and stage changes have separate commands."""
     root, _ = core.load_project(folder)
-    if not isinstance(payload, dict) or set(payload) - {"project", "requirements", "tasks", "deliverables", "risks", "handoff", "expected_revision"}:
+    if not isinstance(payload, dict) or set(payload) - {"project", "requirements", "tasks", "deliverables", "risks", "handoff", "expected_revision", "proposal"}:
         raise ValueError("지원하지 않는 변경 항목입니다.")
     with lock(root):
         root, data, tables = bundle(root)
@@ -171,6 +172,17 @@ def apply_patch(folder, payload, actor="agent"):
                 assigned[name].append(identifier)
             changes[f"registers/{name}.csv"] = table_bytes(root, name, rows)
         validate_tables(root, tables)
+        if "proposal" in payload:
+            if not proposal.enabled(data):
+                raise ValueError("기존 프로젝트는 proposal-setup으로 제안 패키지를 먼저 추가하세요.")
+            patch = payload["proposal"]
+            if not isinstance(patch, dict) or set(patch) - proposal.FIELDS or "schema_version" in patch:
+                raise ValueError("제안 패키지 변경 필드를 확인하세요.")
+            profile = {**proposal.read(root), **patch}
+            proposal.validate(profile)
+            for relative in proposal.files(profile):
+                core.local_file(root, relative)
+            changes[proposal.PROFILE] = json_bytes(profile)
         if "handoff" in payload:
             if not isinstance(payload["handoff"], str) or not payload["handoff"].strip():
                 raise ValueError("handoff는 비어 있지 않은 Markdown이어야 합니다.")
@@ -182,11 +194,49 @@ def apply_patch(folder, payload, actor="agent"):
         return {"revision": revision, "assigned": assigned, "changed_files": sorted(changes)}
 
 
+def setup_proposal(folder, actor="agent"):
+    """Opt in legacy projects without overwriting customer files or approval history."""
+    root, _ = core.load_project(folder)
+    with lock(root):
+        root, data, tables = bundle(root)
+        if proposal.enabled(data):
+            proposal.validate(proposal.read(root))
+            return {"unchanged": True, "required_deliverables": core.required_deliverables(data, "proposal")}
+        rows = tables["deliverables"]
+        templates = [row for row in core.read_table(core.BLUEPRINT, "deliverables") if row["deliverable_id"] in proposal.EXTRA_IDS]
+        changes, adopted = {}, []
+        with (root / "registers/deliverables.csv").open(encoding="utf-8-sig", newline="") as handle:
+            fields = next(csv.reader(handle))
+        for template in templates:
+            existing = next((row for row in rows if row["deliverable_id"] == template["deliverable_id"]), None)
+            if existing and (existing["path"] != template["path"] or existing["stage"] != "proposal"):
+                raise ValueError(f"{template['deliverable_id']}: 기존 사용자 산출물과 충돌합니다. 덮어쓰지 않습니다.")
+            if not existing:
+                rows.append({**dict.fromkeys(fields, ""), **template})
+            target = confined(root, template["path"])
+            if target.exists():
+                adopted.append(template["path"])
+            else:
+                changes[template["path"]] = (core.BLUEPRINT / template["path"]).read_bytes()
+        profile_path = confined(root, proposal.PROFILE)
+        if profile_path.exists():
+            proposal.validate(proposal.read(root))
+        else:
+            changes[proposal.PROFILE] = (core.BLUEPRINT / proposal.PROFILE).read_bytes()
+        data.update(proposal_package=True, updated_at=core.now())
+        changes["project.json"] = json_bytes(data)
+        changes["registers/deliverables.csv"] = table_bytes(root, "deliverables", rows)
+        revision = add_event(root, changes, "proposal-setup", actor, {"added_ids": proposal.EXTRA_IDS, "preserved_files": adopted})
+        commit(root, changes)
+        return {"unchanged": False, "revision": revision, "preserved_files": adopted,
+                "required_deliverables": core.required_deliverables(data, "proposal")}
+
+
 def fingerprint(root, stage, evidence, *, tables=None):
     _, data, actual_tables = bundle(root)
     tables = tables if tables is not None else actual_tables
     order = list(core.STAGES).index(stage)
-    required = set(core.STAGES[stage][1])
+    required = set(core.required_deliverables(data, stage))
     documents = [row for row in tables["deliverables"] if row["deliverable_id"] in required]
     files = {evidence}
     fields = ["requirement_id", "source", "description", "acceptance_criteria", "priority", "exclusion_reason"]
@@ -212,6 +262,11 @@ def fingerprint(root, stage, evidence, *, tables=None):
         files.add(item["path"])
         if item.get("extraction", {}).get("path"):
             files.add(item["extraction"]["path"])
+    if stage == "proposal" and proposal.enabled(data):
+        profile = proposal.read(root)
+        proposal.validate(profile)
+        files.add(proposal.PROFILE)
+        files.update(proposal.files(profile))
     hashes = {ref: hash_file(core.local_file(root, ref)) for ref in sorted(files)}
     scope = {key: data.get(key) for key in ("business_type", "methodology", "objective", "scope_baseline")}
     body = {"stage": stage, "scope": scope, "requirements": sorted(requirements, key=lambda item: item["requirement_id"]),
@@ -266,7 +321,7 @@ def record_review(folder, reviewer, evidence, notes, *, decision="approved", sta
         evidence_path = core.local_file(root, evidence)
         if evidence_path.suffix.lower() in {".md", ".txt"} and (not evidence_path.read_text(encoding="utf-8-sig").strip() or re.search(r"\bTODO\b", evidence_path.read_text(encoding="utf-8-sig"))):
             raise ValueError("검토 근거가 비어 있거나 미작성 상태입니다.")
-        required = set(core.STAGES[stage][1])
+        required = set(core.required_deliverables(data, stage))
         for row in tables["deliverables"]:
             if row["deliverable_id"] in required and row["status"] != "not_applicable":
                 row["status"] = "approved" if decision == "approved" else "in_review"
@@ -392,7 +447,8 @@ def inspect_project(folder):
     for item in list(core.STAGES)[:list(core.STAGES).index(stage) + 1]:
         prior.extend(stale_reviews(root, item, strict=True))
     return {"project": data, "path": str(root), "revision": history[-1]["revision"] if history else None,
-            "stage": stage, "deliverables": [row for row in tables["deliverables"] if row["deliverable_id"] in core.STAGES[stage][1]],
+            "stage": stage, "deliverables": [row for row in tables["deliverables"] if row["deliverable_id"] in core.required_deliverables(data, stage)],
+            "proposal_package": {"enabled": proposal.enabled(data), "profile": proposal.PROFILE if proposal.enabled(data) else None},
             "open_tasks": [row for row in tables["tasks"] if row["status"] != "done"], "inputs": inputs,
             "read_files": ["AGENTS.md", "project.json", "HANDOFF.md", "process/RULES.md", "process/WORKFLOW.md", "process/ROLES.md"],
             "issues": issues, "gate_issues": prior,
@@ -419,7 +475,7 @@ def doctor(folder=None):
 
 def add_parsers(commands):
     for name in COMMANDS:
-        parser = commands.add_parser(name, help={"apply": "원장·프로젝트·인수인계 갱신", "review": "근거와 검토 스냅샷 기록", "advance": "완료 기준 확인 후 다음 단계", "rewind": "변경 근거로 이전 단계 재검토", "ingest": "입력 원본 보존·추출", "discover": "작업 공간의 프로젝트 검색", "inspect": "이어하기 상태와 다음 행동", "doctor": "실행 환경 점검", "recover": "미완료 기록 복구"}[name])
+        parser = commands.add_parser(name, help={"apply": "원장·프로젝트·인수인계 갱신", "review": "근거와 검토 스냅샷 기록", "advance": "완료 기준 확인 후 다음 단계", "rewind": "변경 근거로 이전 단계 재검토", "ingest": "입력 원본 보존·추출", "discover": "작업 공간의 프로젝트 검색", "inspect": "이어하기 상태와 다음 행동", "doctor": "실행 환경 점검", "recover": "미완료 기록 복구", "proposal-setup": "기존 프로젝트에 정성제안·발표 패키지 추가"}[name])
         if name == "discover":
             parser.add_argument("workspace", nargs="?", default=str(Path.cwd()))
         elif name == "doctor":
@@ -443,12 +499,14 @@ def add_parsers(commands):
             parser.add_argument("--evidence", required=True)
         if name == "recover":
             parser.add_argument("--abandoned", action="store_true")
-        if name in {"apply", "ingest", "advance", "rewind"}:
+        if name in {"apply", "ingest", "advance", "rewind", "proposal-setup"}:
             parser.add_argument("--actor", default="agent")
         parser.add_argument("--json", action="store_true", help="항상 구조화된 JSON 결과를 반환합니다.")
 
 
 def run_args(args):
+    if args.command == "proposal-setup":
+        return setup_proposal(args.project, args.actor)
     if args.command == "apply":
         return apply_patch(args.project, json.loads(args.file.read_text(encoding="utf-8-sig")), args.actor)
     if args.command == "ingest":

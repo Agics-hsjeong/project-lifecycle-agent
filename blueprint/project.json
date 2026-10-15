@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "starter_version": "0.3.0",
+  "starter_version": "0.4.0",
+  "proposal_package": true,
   "project_id": "TEMPLATE",
   "name": "미정",
   "business_type": "si",

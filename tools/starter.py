@@ -37,6 +37,11 @@ REQ_STATES = {"proposed", "baselined", "implemented", "verified", "accepted", "d
 DEL_STATES = {"draft", "in_review", "approved", "not_applicable"}
 
 
+def required_deliverables(data, stage):
+    from tools import proposal
+    return STAGES[stage][1] + (proposal.EXTRA_IDS if stage == "proposal" and proposal.enabled(data) else [])
+
+
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -62,6 +67,8 @@ def load_project(folder):
         raise ValueError("methodology는 hybrid, waterfall, agile 중 하나여야 합니다.")
     if not isinstance(data.get("current_stage"), str) or data["current_stage"] not in STAGES:
         raise ValueError("알 수 없는 current_stage입니다.")
+    if "proposal_package" in data and type(data["proposal_package"]) is not bool:
+        raise ValueError("proposal_package는 boolean이어야 합니다.")
     return folder, data
 
 
@@ -215,7 +222,7 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
                     issues.append(f"{rid}: {identifier}의 역방향 요구사항 연결 누락")
                 files(f"{rid}/{identifier}", linked["path"], required=True, inspect_template=True)
 
-    required = set(STAGES[stage][1])
+    required = set(required_deliverables(data, stage))
     for identifier in sorted(required - del_ids):
         issues.append(f"{stage}: 필수 산출물 행 누락 {identifier}")
     for row in deliverables:
@@ -278,6 +285,9 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
     if include_review and check_snapshots and (folder / "state/reviews").is_dir():
         from tools.lifecycle import stale_reviews
         issues.extend(stale_reviews(folder, stage, strict=False))
+    if stage == "proposal":
+        from tools import proposal
+        issues.extend(proposal.check(folder, data, tables))
     return data, stage, issues
 
 
@@ -299,7 +309,7 @@ def print_context(folder):
     print("\n먼저 읽을 파일: AGENTS.md, project.json, HANDOFF.md, process/RULES.md, process/WORKFLOW.md, process/ROLES.md")
     print("현재 단계 산출물:")
     for row in read_table(folder, "deliverables"):
-        if row["deliverable_id"] in STAGES[stage][1]:
+        if row["deliverable_id"] in required_deliverables(data, stage):
             print(f"- {row['deliverable_id']} | {row['path']} | {row['status']}")
     print("\n작업 요청: 현재 단계를 확인하고 근거·가정·질문을 구분해 진행해줘. 관련 원장과 HANDOFF.md를 갱신해줘.")
     print("이 출력은 읽기 목록입니다. 실제 입력·인수인계 파일을 읽어야 하며 대화 첨부만으로 로컬 저장되지는 않습니다.")
