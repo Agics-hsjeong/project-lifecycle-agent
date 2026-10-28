@@ -1,6 +1,6 @@
 """Package only the public fictional example for the documentation website."""
 from pathlib import Path
-from zipfile import ZipFile, ZipInfo, ZIP_DEFLATED
+from zipfile import ZipFile, ZipInfo, ZIP_STORED
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'examples' / 'customer-portal'
@@ -16,14 +16,15 @@ def package():
         path = SOURCE / name
         if path.is_symlink() or not path.resolve().is_relative_to(SOURCE.resolve()):
             raise ValueError('Public examples must be regular files within the example folder.')
-        contents[name] = path.read_bytes()
+        contents[name] = path.read_text(encoding='utf-8').encode('utf-8')
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     temporary = OUTPUT.with_suffix('.zip.tmp')
     try:
-        with ZipFile(temporary, 'w', ZIP_DEFLATED) as archive:
+        with ZipFile(temporary, 'w', ZIP_STORED) as archive:
             for name, content in contents.items():
                 info = ZipInfo('customer-portal/' + name, date_time=(2026, 10, 28, 0, 0, 0))
-                info.compress_type = ZIP_DEFLATED
+                info.compress_type = ZIP_STORED
+                info.create_system = 3
                 info.external_attr = 0o100644 << 16
                 archive.writestr(info, content)
         with ZipFile(temporary) as archive:
