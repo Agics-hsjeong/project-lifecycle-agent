@@ -8,8 +8,8 @@ import stat
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLDERS = (".codex-plugin", ".claude-plugin", ".github", "skills", "blueprint", "tools", "tests", "docs")
-FILES = ("plugin.json", "README.md", "CHANGELOG.md", "AGENTS.md", ".gitignore", ".gitattributes", "LICENSE", "CONTRIBUTING.md", ".agents/plugins/marketplace.json")
+FOLDERS = (".codex-plugin", ".claude-plugin", "skills", "blueprint", "tools", "tests", "docs")
+FILES = ("plugin.json", "README.md", "CHANGELOG.md", "AGENTS.md", ".gitignore", ".gitattributes", "LICENSE", "CONTRIBUTING.md", ".agents/plugins/marketplace.json", ".github/workflows/ci.yml")
 
 
 def package(output=None):

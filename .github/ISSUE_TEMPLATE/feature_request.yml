@@ -1,0 +1,17 @@
+name: 개선 제안
+description: 실제 업무에서 필요한 개선을 제안해 주세요.
+title: '[Idea] '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 어떤 업무의 불편을 해결하고 싶나요?
+      description: 고객 식별 정보 없이 사용 상황을 설명해 주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 원하는 개선과 기대 효과
+    validations:
+      required: true

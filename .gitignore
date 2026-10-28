@@ -9,3 +9,9 @@ Thumbs.db
 dist/
 projects/
 reference-templates/
+node_modules/
+.astro/
+website/.npm-cache/
+website/.preview/
+output/
+tmp/

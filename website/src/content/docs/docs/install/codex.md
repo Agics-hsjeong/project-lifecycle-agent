@@ -1,0 +1,45 @@
+---
+title: Codex에 설치하기
+description: Codex에 프로젝트이음 marketplace와 플러그인을 처음 한 번 설치합니다.
+---
+
+Codex에 로그인한 상태에서 설치합니다. 저장소 설치에는 Git, 실행에는 Python 3.10 이상 또는 호스트 제공 런타임이 필요합니다. 에이전트가 먼저 환경을 확인하게 하세요.
+
+## 권장: Codex에 설치를 요청하세요
+
+```text
+Agics-hsjeong/project-lifecycle-agent의 main 브랜치를 marketplace로 등록하고,
+project-lifecycle-agent 플러그인을 설치해줘.
+설치·활성화 상태와 Python 실행 환경도 확인해줘.
+```
+
+설치 도구를 사용할 수 있는 환경에서 에이전트가 처리합니다. 호스트가 최초 설치나 파일 접근을 확인하면 해당 화면에서 허용해야 합니다.
+
+## 직접 설치하는 경우
+
+다음 두 줄은 **터미널에서 한 줄씩** 실행합니다. Windows의 PowerShell, macOS/Linux의 터미널에서 사용할 수 있습니다. 매 프로젝트마다 반복하는 명령이 아닙니다.
+
+```sh
+codex plugin marketplace add Agics-hsjeong/project-lifecycle-agent --ref main
+codex plugin add project-lifecycle-agent@project-lifecycle-marketplace
+```
+
+`codex` 명령을 찾지 못하면 “CLI 위치와 설치 가능한 방법을 진단해줘”라고 요청하세요.
+
+## 설치 후 새 채팅을 시작하세요
+
+앱을 다시 열거나 새 채팅을 시작합니다. 등록된 `project-lifecycle-marketplace`에서 설치·활성화 상태를 확인할 수 있습니다.
+
+스킬이 자동 선택되지 않으면 대화 입력창에서 다음을 호출합니다.
+
+```text
+$project-lifecycle
+```
+
+이후 [첫 프로젝트 만들기](../../first-project/)의 요청문을 전달하세요. 고객 업무 폴더는 플러그인 설치 캐시와 분리합니다.
+
+## 이름과 설치 경로
+
+서비스의 브랜드는 **프로젝트이음(Project Ieum)**입니다. 저장소·플러그인 ID와 스킬 호출 이름은 `project-lifecycle-agent` / `project-lifecycle`을 사용하므로 기존 설치와 연결됩니다. 공식 공개 디렉터리에 기본 등록된 항목을 찾는 방식이 아니라 이 GitHub marketplace를 직접 등록하는 방식입니다.
+
+[OpenAI 공식 플러그인 문서](https://developers.openai.com/plugins/build/plugins) · [업데이트·문제 해결](../../reference/troubleshooting/)

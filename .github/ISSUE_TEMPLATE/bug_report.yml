@@ -1,0 +1,27 @@
+name: 오류 제보
+description: 설치·업무 진행 중 발견한 오류를 알려주세요.
+title: '[Bug] '
+body:
+  - type: markdown
+    attributes:
+      value: '고객 원본·개인 정보·인증 정보는 포함하지 마세요. 가상 자료로 재현해 주세요.'
+  - type: textarea
+    id: environment
+    attributes:
+      label: 사용 환경
+      description: Codex/Claude Code, 플러그인 버전과 운영체제
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 재현 단계와 오류
+      description: 어떤 요청에서 어떤 오류가 발생했는지 알려주세요.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 기대한 결과
+    validations:
+      required: true

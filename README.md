@@ -1,4 +1,10 @@
-# Project Lifecycle Agent
+# 프로젝트이음 · Project Ieum
+
+제안부터 운영까지, 프로젝트의 모든 단계를 잇습니다.
+
+**[소개·사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/) · [처음 시작하기](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/start/) · [공개 예제](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/examples/portal/) · [사용자 매뉴얼 PDF](https://agics-hsjeong.github.io/project-lifecycle-agent/downloads/project-ieum-user-guide.pdf)**
+
+표시 브랜드는 **프로젝트이음(Project Ieum)**입니다. 설치 ID는 기존 `project-lifecycle-agent`, marketplace는 `project-lifecycle-marketplace`, 스킬 호출은 `project-lifecycle`을 사용합니다.
 
 **제안요청서와 예전 제안서·발표자료를 전달하면, Codex와 Claude Code가 제안 작성부터 프로젝트 운영까지 돕는 오픈소스 플러그인입니다.** 외주/SI와 자체 서비스 프로젝트에 사용할 수 있습니다.
 
@@ -255,6 +261,8 @@ Project Lifecycle Agent의 설치 소스와 버전을 확인하고 최신 main�
 - 기존 고객 프로젝트를 새 기본형으로 통째로 덮어쓰지 않습니다. 적용 차이·범위·이행 방법을 기록하고 필요한 항목을 보존하며 추가합니다.
 
 ## 상세 문서와 개발자 안내
+
+웹사이트 소스는 [website/](website/README.md)에 있으며 Astro·Starlight로 구성합니다. GitHub Actions에서 사이트 빌드·내부 링크를 검사하고 GitHub Pages로 배포합니다. 웹 의존성과 다운로드 자료는 기존 Python 플러그인 패키지와 분리합니다. 사이트는 소개·가이드·공개 예제를 제공하며 실제 고객 자료 처리는 사용자의 Codex·Claude Code에서 수행합니다.
 
 | 문서 | 내용 |
 | --- | --- |

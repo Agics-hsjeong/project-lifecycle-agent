@@ -1,0 +1,16 @@
+:root {
+  --sl-color-accent-low: #073d44;
+  --sl-color-accent: #087f8c;
+  --sl-color-accent-high: #b0e2dc;
+  --sl-font: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d8efeb;
+  --sl-color-accent: #08717c;
+  --sl-color-accent-high: #0a454d;
+}
+.site-title { font-weight: 800; letter-spacing: -.04em; }
+.sl-markdown-content { line-height: 1.85; word-break: keep-all; overflow-wrap: anywhere; }
+.sl-markdown-content h2 { letter-spacing: -.035em; }
+.sl-markdown-content pre { word-break: normal; }
+header.header { backdrop-filter: blur(16px); }

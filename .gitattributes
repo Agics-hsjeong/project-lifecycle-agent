@@ -5,3 +5,9 @@
 *.yml text eol=lf
 *.csv text eol=lf
 *.zip binary
+*.pdf binary
+*.png binary
+*.css text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.astro text eol=lf
