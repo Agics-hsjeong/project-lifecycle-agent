@@ -3,7 +3,7 @@ from collections import Counter
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
-import xml.etree.ElementTree as ET
+from tools.document_safety import xml_bytes
 from zipfile import ZipFile
 
 from tools.intake import MAX_SOURCE_BYTES, MAX_XML_BYTES
@@ -22,10 +22,7 @@ def xml(archive, name):
     if info.file_size > MAX_XML_BYTES:
         raise ValueError("템플릿 XML 크기 제한 초과")
     value = archive.read(name)
-    normalized = value.replace(b"\x00", b"").upper()
-    if b"<!DOCTYPE" in normalized or b"<!ENTITY" in normalized:
-        raise ValueError("DTD/엔터티가 있는 템플릿 XML은 자동 분석하지 않습니다.")
-    return ET.fromstring(value)
+    return xml_bytes(value)
 
 
 def text(node, limit=600):

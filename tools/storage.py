@@ -7,6 +7,24 @@ import os
 import stat
 from pathlib import Path
 import tempfile
+import threading
+from functools import wraps
+
+_OWNED = threading.local()
+
+
+def consistent_read(function):
+    """Serialize a complete managed-state read with engine writers."""
+    @wraps(function)
+    def wrapped(folder, *args, **kwargs):
+        root = Path(folder).resolve()
+        if not (root / "project.json").is_file():
+            raise ValueError("프로젝트 파일이 없습니다.")
+        if root in getattr(_OWNED, "roots", set()):
+            return function(folder, *args, **kwargs)
+        with lock(root):
+            return function(folder, *args, **kwargs)
+    return wrapped
 
 
 def digest(value):
@@ -67,8 +85,12 @@ def lock(root, *, recovering=False):
     try:
         if not recovering and confined(root, "state/pending.json").exists():
             raise ValueError("미완료 변경 기록이 있습니다. recover로 먼저 복구하세요.")
+        roots = getattr(_OWNED, "roots", set())
+        _OWNED.roots = roots
+        roots.add(Path(root).resolve())
         yield
     finally:
+        getattr(_OWNED, "roots", set()).discard(Path(root).resolve())
         path.unlink(missing_ok=True)
 
 
@@ -82,11 +104,15 @@ def commit(root, changes):
         path = confined(root, relative)
         before = path.read_bytes() if path.exists() else None
         entries.append({"path": relative, "before": base64.b64encode(before).decode() if before is not None else None,
-                        "after": digest(content)})
+                        "after": digest(content) if content is not None else None})
     atomic_write(pending, json_bytes({"schema_version": 1, "entries": entries}))
     try:
         for relative, content in changes.items():
-            atomic_write(confined(root, relative), content)
+            path = confined(root, relative)
+            if content is None:
+                path.unlink(missing_ok=True)
+            else:
+                atomic_write(path, content)
     except BaseException:
         _restore(root, entries)
         pending.unlink()

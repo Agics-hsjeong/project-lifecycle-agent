@@ -2,7 +2,7 @@
 import hashlib
 import importlib.util
 from pathlib import Path
-import xml.etree.ElementTree as ET
+from tools.document_safety import xml_bytes, pdf_reader
 from zipfile import ZipFile
 
 MAX_SOURCE_BYTES = 64 * 1024 * 1024
@@ -17,7 +17,7 @@ def hash_file(path):
     return result.hexdigest()
 
 
-def extract_text(path):
+def extract_text(path, *, coverage=None):
     path = Path(path)
     extension = path.suffix.lower()
     if extension in {".md", ".txt", ".csv", ".json", ".tsv"}:
@@ -38,21 +38,27 @@ def extract_text(path):
             paragraphs = []
             for name in names:
                 raw = archive.read(name)
-                if b"<!DOCTYPE" in raw.upper() or b"<!ENTITY" in raw.upper():
-                    return None, "needs_reader", "DTD/외부 엔터티 선언이 있는 XML은 자동 추출하지 않습니다."
-                root = ET.fromstring(raw)
+                root = xml_bytes(raw)
                 for paragraph in root.iter():
                     if paragraph.tag.rsplit("}", 1)[-1] == "p":
                         paragraphs.append("".join(node.text or "" for node in paragraph.iter() if node.tag.rsplit("}", 1)[-1] == "t"))
             return "\n".join(paragraphs), "extracted", "표·도형·각주 등은 원본과 대조하세요."
     if extension == ".pdf" and importlib.util.find_spec("pypdf"):
-        from pypdf import PdfReader
-        reader = PdfReader(path)
-        if reader.is_encrypted:
-            return None, "needs_reader", "암호화된 PDF는 호스트의 문서 도구로 읽으세요."
-        pages = [f"[page {index}]\n{page.extract_text() or ''}" for index, page in enumerate(reader.pages, 1)]
-        if any(page.split("\n", 1)[1].strip() for page in pages):
-            return "\n\n".join(pages), "extracted", "추출 텍스트와 원본 페이지를 대조하세요."
+        reader = pdf_reader(path)
+        pages, states = [], []
+        for index, page in enumerate(reader.pages, 1):
+            try:
+                content = page.extract_text() or ""
+                state = "extracted" if content.strip() else "needs_ocr"
+            except Exception:
+                content, state = "", "failed"
+            pages.append(f"[page {index}]\n{content}")
+            states.append({"page": index, "status": state})
+        if coverage is not None:
+            coverage.update(page_count=len(states), pages=states)
+        if any(item["status"] == "extracted" for item in states):
+            status = "extracted" if all(item["status"] == "extracted" for item in states) else "partial"
+            return "\n\n".join(pages), status, "추출 텍스트와 원본을 대조하고 미판독 페이지를 OCR·확인하세요."
         return None, "needs_ocr", "텍스트가 없는 PDF입니다. OCR 도구가 필요합니다."
     return None, "needs_reader", "호스트의 문서 읽기/OCR 도구를 사용하세요. PDF 자동 추출은 선택적 pypdf가 있을 때 지원합니다."
 
@@ -62,8 +68,9 @@ def make_record(source, identifier, relative, timestamp):
     if source.stat().st_size > MAX_SOURCE_BYTES:
         raise ValueError("자동 등록 파일은 64 MiB 이하여야 합니다. 대용량 자료는 분리하거나 별도로 참조하세요.")
     checksum = hash_file(source)
+    coverage = {}
     try:
-        text, status, reason = extract_text(source)
+        text, status, reason = extract_text(source, coverage=coverage)
     except Exception as exc:
         # Parsing failure must not discard or misrepresent the preserved original.
         text, status, reason = None, "needs_reader", f"자동 추출 실패: {type(exc).__name__}"
@@ -77,5 +84,6 @@ def make_record(source, identifier, relative, timestamp):
     return {
         "input_id": identifier, "original_name": source.name, "path": relative,
         "sha256": checksum, "size": source.stat().st_size, "imported_at": timestamp,
-        "extraction": {"status": status, "path": extracted_path, "note": reason},
+        "purpose": "baseline",
+        "extraction": {"status": status, "path": extracted_path, "note": reason, **coverage},
     }, text

@@ -63,6 +63,21 @@ class PluginTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(json.loads(result.stdout)["ready"])
 
+    def test_doctor_rejects_tampered_installed_skill(self):
+        test_root = ROOT / ".test-output"
+        with tempfile.TemporaryDirectory(dir=test_root) as directory:
+            temporary = Path(directory)
+            archive_path = packager.package(temporary / "plugin.zip")
+            with ZipFile(archive_path) as archive:
+                archive.extractall(temporary / "unpacked")
+            plugin = temporary / "unpacked/project-lifecycle-agent"
+            skill = plugin / "skills/project-lifecycle/SKILL.md"
+            skill.write_bytes(skill.read_bytes() + b"\nChanged after packaging.\n")
+            result = subprocess.run([sys.executable, "-B", "-X", "utf8", str(plugin / "tools/starter.py"), "doctor"],
+                cwd=temporary, capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(json.loads(result.stdout)["checks"]["package_integrity"])
+
     def test_link_rejection_preserves_previous_artifact(self):
         test_root = ROOT / ".test-output"
         test_root.mkdir(exist_ok=True)

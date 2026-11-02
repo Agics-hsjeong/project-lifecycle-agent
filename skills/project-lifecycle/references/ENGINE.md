@@ -50,8 +50,8 @@ python <plugin-root>/tools/starter.py template-prepare <project> --kind qualitat
 
 반환한 assigned.requirements[0]을 다음 변경의 requirement_ids에 사용한다. ID를 생략한 행은 신규 등록, 기존 ID는 차이만 갱신한다. 삭제는 제공하지 않으며 제외 요구는 deferred와 사유로 기록한다.
 
-- `expected_revision`은 최신 inspect의 값. 첫 기록 이전에는 null이다. 생략 가능하지만 공유 작업에서는 항상 보낸다.
-- `project`는 name/objective/scope_baseline/client_or_product_owner/project_manager/technical/tailoring/methodology를 지원한다. current_stage는 변경할 수 없다.
+- `expected_revision`은 최신 inspect의 값이며 필수다. 첫 기록 이전에는 null이다. 누락·충돌이면 쓰기 없이 거부한다.
+- `project`는 name/objective/scope_baseline/client_or_product_owner/project_manager/technical/tailoring/methodology/workflow를 지원한다. current_stage는 변경할 수 없다.
 - 원장 각 값은 문자열이다. 여러 ID·파일은 `;`로 구분한다. 추가 CSV 열과 열 순서는 보존된다.
 - approved는 apply에서 지정할 수 없다. review가 검사 후 해당 단계 필수 산출물을 승인한다. 이미 승인된 행의 편집은 in_review로 되돌린다.
 - done 작업은 실제 evidence_refs가 필요하다. 파일 참조는 프로젝트 내부의 `/` 상대 경로다. 외부 산출물은 로컬 명세에 URL·버전·확인일을 기록한다.
@@ -65,4 +65,15 @@ python <plugin-root>/tools/starter.py template-prepare <project> --kind qualitat
 
 state/events.jsonl은 변경 이력, state/reviews/는 검토 시점의 해시, state/pending.json은 복구용 변경 전 데이터다. 엔진이 관리한다. 인증·전자서명·변조 방지 기능은 아니다.
 
+state/history/에는 새 엔진이 변경한 관리 파일의 이전 내용이 지속 보관된다. 기존 코드·문서의 일반 편집은 Git/백업으로 관리한다. run-create/run-result/run-resume, input-review, artifact-review, dashboard, history/undo-preview/undo의 실제 요청 형식과 기존 프로젝트 이행은 [v2 구현·운영 규격](../../../docs/V2-IMPLEMENTATION.md)을 읽는다. 모든 요청 파일과 조회·검증은 에이전트가 수행한다.
+
 `recover`는 미완료 작업 이전 상태로 되돌린다. 현재 파일이 기록한 변경 전/후 어디에도 해당하지 않으면 중단한다. 살아 있는 PID의 잠금은 `--abandoned`로도 해제하지 않는다.
+
+## 기존 프로젝트 v2 이행
+
+`doctor <project>`는 로딩한 plugin_root·엔진 버전·프로젝트 경로·관리 버전·upgrade_required를 구분한다. 배포 ZIP을 푼 설치본은 PACKAGE.json의 파일별 해시도 검사한다.
+
+- `upgrade-preview <project>`: 실제 변경 계획. 단계·프로필·ID·문서·기존 승인 파일은 덮어쓰지 않는다.
+- `upgrade <project> --file <plan.json>`: 최신 계획과 revision·관리 파일 해시가 모두 같을 때 관리 버전·updated_at만 변경. 변경 전 project.json은 state/upgrades에 보관하며 전체 고객 프로젝트 백업을 뜻하지 않는다.
+- `upgrade-restore-preview <project> --upgrade-id <UPG-id>` 후 `upgrade-restore <project> --file <plan.json>`: 이후 수정·이력이 없을 때만 관리 정보를 되돌리고 감사 이력은 보존한다.
+- 도구·계획 파일 작성·백업 확인은 에이전트가 수행한다. 버전만 올려 과거 승인·검수의 유효성을 인증하지 않는다. inspect의 실제 재검토 사유를 해결한다.

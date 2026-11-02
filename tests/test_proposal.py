@@ -1,3 +1,4 @@
+from revision_fixtures import apply_current
 import csv
 import json
 from pathlib import Path
@@ -19,7 +20,7 @@ class ProposalTests(unittest.TestCase):
         deliveries = starter.read_table(self.project, "deliverables")
         for row in deliveries:
             (self.project / row["path"]).write_text("가상 테스트 전용 산출물", encoding="utf-8")
-        lifecycle.apply_patch(self.project, {
+        apply_current(self.project, {
             "project": {"objective": "가상 목표", "scope_baseline": "가상 범위", "project_manager": "가상 PM", "client_or_product_owner": "가상 책임자"},
             "requirements": [{"source": "가상 RFP §1", "description": "가상 요구", "priority": "must", "acceptance_criteria": "가상 기준", "status": "baselined"}],
             "deliverables": [{"deliverable_id": row["deliverable_id"], "owner": "가상 담당자", "status": "in_review"} for row in deliveries],
@@ -40,7 +41,7 @@ class ProposalTests(unittest.TestCase):
         return proposal.check(root, data, tables)
 
     def apply(self, **changes):
-        return lifecycle.apply_patch(self.project, {"proposal": changes})
+        return apply_current(self.project, {"proposal": changes})
 
     def approve(self):
         return lifecycle.record_review(self.project, "가상 검토자", "review.md", "가상 결정")
@@ -95,7 +96,7 @@ class ProposalTests(unittest.TestCase):
         self.apply(presentation_required=False, presentation_file="", slides=[],
                    criteria=[dict(self.profile["criteria"][0], slide_ids=[])])
         self.assertTrue(any("제외" in issue for issue in self.issues()))
-        lifecycle.apply_patch(self.project, {"proposal": {"presentation_exclusion_reason": "가상 원문: 발표 없음"},
+        apply_current(self.project, {"proposal": {"presentation_exclusion_reason": "가상 원문: 발표 없음"},
             "deliverables": [{"deliverable_id": identifier, "status": "not_applicable", "exclusion_reason": "가상 원문: 발표 없음"}
                              for identifier in ("DEL-016", "DEL-017")]})
         self.assertEqual(self.issues(), [])
@@ -126,7 +127,7 @@ class ProposalTests(unittest.TestCase):
 
     def test_legacy_id_collision_never_overwrites_customer_artifact(self):
         self.make_legacy()
-        lifecycle.apply_patch(self.project, {"deliverables": [{"deliverable_id": "DEL-015", "stage": "proposal", "path": "docs/02-proposal.md", "title": "고객 자체 산출물"}]})
+        apply_current(self.project, {"deliverables": [{"deliverable_id": "DEL-015", "stage": "proposal", "path": "docs/02-proposal.md", "title": "고객 자체 산출물"}]})
         before = (self.project / "registers/deliverables.csv").read_bytes()
         with self.assertRaisesRegex(ValueError, "충돌"):
             lifecycle.setup_proposal(self.project)

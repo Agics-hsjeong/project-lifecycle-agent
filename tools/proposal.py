@@ -81,6 +81,10 @@ def check_export(path, role, slide_count=None):
     if suffix == ".pdf":
         if not header.startswith(b"%PDF-"):
             raise ValueError("PDF 파일 헤더가 올바르지 않습니다.")
+        from tools.document_safety import pdf_reader
+        reader = pdf_reader(path)
+        if role == "presentation" and slide_count is not None and len(reader.pages) != slide_count:
+            raise ValueError("발표 PDF 페이지 수와 관리 목록이 다릅니다.")
     elif suffix == ".hwp":
         if header != b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
             raise ValueError("HWP 파일 헤더가 올바르지 않습니다.")
@@ -178,4 +182,6 @@ def check(root, data, tables):
             issues.append(f"제안 패키지/{relative}: {exc}")
     from tools import reference_templates
     issues.extend(reference_templates.check(root, profile))
+    from tools import artifacts
+    issues.extend(artifacts.check(root, data, profile))
     return issues
