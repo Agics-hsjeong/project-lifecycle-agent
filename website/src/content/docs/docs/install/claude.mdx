@@ -3,14 +3,15 @@ title: Claude Code에 설치하기
 description: Claude Code 대화 입력창에서 프로젝트이음을 설치하고 사용합니다.
 ---
 
+import InstallInstructions from '../../../../components/InstallInstructions.astro';
+import CopyBlock from '../../../../components/CopyBlock.astro';
+
+
 일반 Claude 웹 채팅이 아닌 **Claude Code**에서 사용합니다. 로그인한 뒤 아래 명령을 실행하세요.
 
 ## 대화 입력창에 한 줄씩 입력하세요
 
-```text
-/plugin marketplace add Agics-hsjeong/project-lifecycle-agent
-/plugin install project-lifecycle-agent@project-lifecycle-marketplace
-```
+<InstallInstructions host="claude" />
 
 위 명령은 PowerShell에 입력하는 명령이 아닙니다. **Claude Code의 대화 입력창**에서 실행합니다.
 
@@ -37,3 +38,9 @@ description: Claude Code 대화 입력창에서 프로젝트이음을 설치하�
 브랜드는 프로젝트이음이며 설치 ID는 `project-lifecycle-agent@project-lifecycle-marketplace`입니다. 기존 사용자는 같은 ID의 업데이트를 사용합니다.
 
 [Claude Code 공식 설치 문서](https://code.claude.com/docs/en/discover-plugins) · [업데이트·문제 해결](../../reference/troubleshooting/)
+
+## 설치 확인 후 다음으로
+
+<CopyBlock label="설치·실행 환경 확인 요청" text="project-lifecycle-agent의 설치·활성화 상태와 실제 로딩 버전, Python 실행 환경을 확인해줘. 준비되지 않았다면 원인과 해결 방법을 알려줘." />
+
+[설치 후 업무 폴더와 RFP로 시작하기 →](../../quickstart/?host=claude&step=project)

@@ -47,3 +47,5 @@ PDF 재생성 소스는 `scripts/build-manual.py`입니다. 선택적 제작 의
 - start.mdx·first-project.mdx는 기존 공개 주소를 유지하며 같은 시작 도구를 포함한다. 새 의존성이나 별도 서버는 필요하지 않다.
 
 스타일 수정 시 랜딩과 문서의 밝은/어두운 테마, 좁은 화면, 키보드·검색·복사 실패·reduced-motion을 함께 확인한다. 세부 기준과 검증 범위는 [DESIGN.md](DESIGN.md)에 기록한다.
+
+초심자 모바일 동선은 OnboardingGuide.astro, InstallInstructions.astro, CopyBlock.astro와 onboarding.css·mobile.css가 담당한다. 설치 문서도 같은 컴포넌트를 사용한다. 상태는 공개 URL의 host/step으로 표현하며 원본 파일을 웹에서 업로드·제작하지 않는다. 점검 범위는 [MOBILE-UX-AUDIT.md](MOBILE-UX-AUDIT.md)에 기록한다.

@@ -14,10 +14,11 @@ export default defineConfig({
       locales: { root: { label: '한국어', lang: 'ko' } },
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Agics-hsjeong/project-lifecycle-agent' }],
       editLink: { baseUrl: 'https://github.com/Agics-hsjeong/project-lifecycle-agent/edit/main/website/' },
-      customCss: ['./src/styles/docs.css'],
+      customCss: ['./src/styles/docs.css', './src/styles/mobile.css'],
       components: { Header: './src/components/docs/Header.astro', Sidebar: './src/components/docs/Sidebar.astro', PageTitle: './src/components/docs/PageTitle.astro', Footer: './src/components/docs/Footer.astro' },
       sidebar: [
         { label: '처음 시작하기', items: [
+          { label: '설치부터 내 제안서까지', slug: 'docs/quickstart' },
           { label: '전체 흐름', slug: 'docs/start' },
           { label: 'Codex 설치', slug: 'docs/install/codex' },
           { label: 'Claude Code 설치', slug: 'docs/install/claude' },
