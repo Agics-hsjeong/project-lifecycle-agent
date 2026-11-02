@@ -106,7 +106,7 @@ story.append(Spacer(1, 28))
 body('<b>사용자는 자료·목표·사업 결정을 전달합니다.</b><br/>에이전트가 폴더 생성, 분석, 산출물 제작, 검수와 기록 관리를 처리합니다.')
 story.append(Spacer(1, 28))
 body('대상: 처음 사용하는 실무자 · 제안 담당자 · 프로젝트 관리자')
-story.append(p(f'v{VERSION} 로컬 베타  |  {MANUAL_DATE}  |  MIT License', 'small'))
+story.append(p(f'v{VERSION} 베타  |  {MANUAL_DATE}  |  MIT License', 'small'))
 story.append(p(f'<link href="{REPO}" color="#087F8C">GitHub 저장소 열기</link>', 'small'))
 
 # 02 - Map
@@ -282,7 +282,7 @@ body('공유되는 것은 파일과 관리 기록이며 대화 이력은 자동 
 # 13 - Update / FAQ
 chapter(12, '업데이트와 문제 해결', 'SUPPORT / 12')
 card('업데이트 요청', 'Project Lifecycle Agent의 설치 소스와 버전을 확인하고 최신 main으로 업데이트해줘.\n기존 고객 프로젝트와 원본 자료는 보존해줘.\n새 양식이 필요하면 차이·적용 범위·이행 방법을 먼저 정리해줘.')
-body('두 제품은 각각 업데이트하고 새 세션에서 사용합니다. 로컬 베타·공개 main·설치본의 실제 버전을 구분합니다. 기존 프로젝트는 이행 미리보기와 관리정보 백업 후 적용합니다. 문서·ID·단계는 덮어쓰지 않으며, 이후 수정이 있으면 이행 되돌리기를 중단합니다.')
+body('두 제품은 각각 업데이트하고 새 세션에서 사용합니다. 베타·공개 main·설치본의 실제 버전을 구분합니다. 기존 프로젝트는 이행 미리보기와 관리정보 백업 후 적용합니다. 문서·ID·단계는 덮어쓰지 않으며, 이후 수정이 있으면 이행 되돌리기를 중단합니다.')
 table(['상황', '에이전트에게 요청할 내용'], [
     ['스킬이 안 보임', '설치·활성화·로딩 버전을 진단. 새 세션에서 명시적 스킬 호출.'],
     ['옛 버전만 보임', 'marketplace의 태그 고정 여부와 main 전환 방법 확인.'],
@@ -318,7 +318,7 @@ links = [
 for label, url in links:
     story.append(p(f'<link href="{url}" color="#087F8C">{escape(label)}</link>', 'body'))
 sub('이 매뉴얼의 기준')
-body(f'v{VERSION} 로컬 베타 기준입니다. SI·제품·API·유지보수 프로필과 릴리스 범위, 작업 재개, 관리 변경 복원, 전체 출력 검수와 로컬 현황을 제공합니다. 실제 업무 결정·내용·디자인은 근거를 확인해야 합니다. 공개 배포와 설치본의 버전은 별도로 확인합니다.')
+body(f'v{VERSION} 베타 기준입니다. SI·제품·API·유지보수 프로필과 릴리스 범위, 작업 재개, 관리 변경 복원, 전체 출력 검수와 로컬 현황을 제공합니다. 실제 업무 결정·내용·디자인은 근거를 확인해야 합니다. 공개 배포와 설치본의 버전은 별도로 확인합니다.')
 story.append(p(f'갱신일 {MANUAL_DATE}  |  안내 링크는 클릭할 수 있습니다.', 'small'))
 
 def page_header(c, doc):

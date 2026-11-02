@@ -9,7 +9,9 @@ from tools import starter, lifecycle, upgrade
 
 class UpgradeTests(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory(dir=starter.ROOT / '.test-output')
+        test_root = starter.ROOT / '.test-output'
+        test_root.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(dir=test_root)
         self.root = starter.init_project(Path(self.temp.name), 'legacy', 'Synthetic legacy', 'product')
         data = json.loads((self.root / 'project.json').read_text(encoding='utf-8'))
         data.update(starter_version='0.5.1', current_stage='planning')
