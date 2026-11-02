@@ -2,6 +2,11 @@
 import release from '../../../plugin.json';
 import '../styles/home.css';
 import '../styles/visuals.css';
+import Brand from '../components/Brand.astro';
+import ProjectExplorer from '../components/ProjectExplorer.astro';
+import StartBuilder from '../components/StartBuilder.astro';
+import Experience from '../components/Experience.astro';
+import '../styles/studio.css';
 import TechnicalDiagram from '../components/TechnicalDiagram.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const url = (path = '') => `${base}/${path}`;
@@ -54,10 +59,7 @@ const resources = [
     <a class="skip-link" href="#main">본문으로 이동</a>
     <header class="site-header">
       <div class="container header-inner">
-        <a class="brand" href={url()} aria-label="프로젝트이음 홈">
-          <img src={url('brand/symbol.png')} alt="" width="38" height="25" />
-          <span>프로젝트이음</span>
-        </a>
+        <Brand />
         <nav class="desktop-nav" aria-label="주 메뉴">
           <a href="#architecture">아키텍처</a><a href="#workflow">사용 흐름</a>
           <a href="#target-system">목표 시스템</a><a href="#templates">템플릿 활용</a>
@@ -76,29 +78,30 @@ const resources = [
     </header>
 
     <main id="main">
+      <div class="hero-stage" data-spotlight><div class="hero-atmosphere" aria-hidden="true"><span></span><span></span></div>
       <section class="container hero" aria-labelledby="hero-title">
         <div class="hero-copy">
           <a class="release-link" href={releaseUrl}><span class="release-mark" aria-hidden="true"></span> v{release.version} <span class="release-divider">/</span> 베타 릴리스 <span aria-hidden="true">↗</span></a>
+          <p class="hero-kicker ieum-eyebrow">THE CONNECTED PROJECT WORKSPACE</p>
           <h1 id="hero-title">제안부터 운영까지,<br/><span>일의 기준을 잇다.</span></h1>
           <p class="hero-description">RFP와 팀의 템플릿으로 시작해<br class="desktop-only"/> 요구사항, 산출물, 검토 기록을 연결합니다.</p>
           <p class="hero-definition">Codex · Claude Code용 오픈소스 프로젝트 관리 플러그인</p>
           <div class="hero-actions">
-            <a class="button" href="#install">내 작업에 이음 더하기 <span aria-hidden="true">↗</span></a>
+            <a class="button" href="#start-builder">내 프로젝트 시작하기 <span aria-hidden="true">↗</span></a>
             <a class="inline-link" href="#architecture">구조 먼저 살펴보기 <span aria-hidden="true">↓</span></a>
           </div>
         </div>
-        <figure class="project-fabric">
-          <picture><source media="(max-width: 600px)" srcset={url('diagrams/project-fabric-mobile.svg')}/><img src={url('diagrams/project-fabric.svg')} alt="RFP와 팀 템플릿이 프로젝트이음을 거쳐 제안·구축·운영과 하나의 프로젝트 기록으로 이어지는 개념도" width="740" height="555" fetchpriority="high" /></picture>
-          <figcaption><span class="mono">FIG. 01</span><span>프로젝트를 잇는 구조</span><span>개념 시각화</span></figcaption>
-        </figure>
+        <ProjectExplorer />
       </section>
 
       <div class="container"><div class="principle-strip"><p>한 번 설치하고, 익숙한 대화로.</p><ul><li>내 작업 폴더에 남는 기록</li><li>두 AI가 이어 읽는 프로젝트</li><li>MIT 오픈소스</li></ul></div></div>
 
-      <section class="architecture-section" id="architecture" aria-labelledby="architecture-title">
+      </div>
+
+      <section data-reveal class="architecture-section" id="architecture" aria-labelledby="architecture-title">
         <div class="container">
           <div class="section-intro"><div><p class="section-index">01 <span>/</span> 실행 아키텍처</p><h2 id="architecture-title">두 AI 사이에,<br/>하나의 프로젝트 기준.</h2></div><div class="architecture-intro"><p>작업은 익숙한 AI에서.<br/>기준과 기록은 내 프로젝트에.</p><a href={url('docs/guides/v2/')} class="inline-link">v2 기술 가이드 <span aria-hidden="true">↗</span></a></div></div>
-          <figure class="technical-figure architecture-figure">
+          <figure class="technical-figure architecture-figure" data-spotlight>
             <div class="figure-toolbar"><span class="mono">IEUM / SYSTEM ARCHITECTURE</span><a href={url('diagrams/architecture.svg')} target="_blank" rel="noopener">원본 SVG 보기 <span aria-hidden="true">↗</span><span class="visually-hidden"> (새 탭)</span></a></div>
             <TechnicalDiagram kind="architecture" />
             <figcaption><span class="mono">FIG. 02</span><p>호스트가 실제 작업을 수행하고, 이음은 상태와 근거를 관리합니다. 대화 이력은 자동 동기화되지 않으며, 프로젝트 파일로 작업을 이어갑니다.</p></figcaption>
@@ -107,7 +110,7 @@ const resources = [
         </div>
       </section>
 
-      <section class="container section workflow-section" id="workflow" aria-labelledby="workflow-title">
+      <section data-reveal class="container section workflow-section" id="workflow" aria-labelledby="workflow-title">
         <div class="section-intro"><div><p class="section-index">02 <span>/</span> 사용 흐름</p><h2 id="workflow-title">모든 프로젝트가<br/>같은 순서는 아니니까.</h2></div><p class="section-description">사업의 형태에 맞는 단계를 선택하고,<br/>지금 할 일과 다음에 할 일을 구분합니다.</p></div>
         <div class="profile-tabs" role="tablist" aria-label="프로젝트 유형">
           {profiles.map((profile,i) => <button type="button" role="tab" id={`profile-tab-${profile.id}`} aria-controls={`profile-${profile.id}`} aria-selected={i===0?'true':'false'} tabindex={i===0?0:-1} data-profile-tab={profile.id}>{profile.label}<span aria-hidden="true">↗</span></button>)}
@@ -119,7 +122,7 @@ const resources = [
         <div class="handoff-note"><span class="handoff-mark" aria-hidden="true">↔</span><div><h3>도구를 바꿔도, 처음부터 설명하지 않도록.</h3><p>프로젝트 파일과 HANDOFF.md를 함께 읽어 Codex와 Claude Code에서 이어갑니다. 대화 이력은 자동으로 공유되지 않습니다.</p></div><a href={url('docs/guides/handoff/')} aria-label="Codex와 Claude Code 이어하기 가이드">이어하기 가이드 <span aria-hidden="true">↗</span></a></div>
       </section>
 
-      <section class="target-section" id="target-system" aria-labelledby="target-title">
+      <section data-reveal class="target-section" id="target-system" aria-labelledby="target-title">
         <div class="container">
           <div class="section-intro"><div><p class="section-index">03 <span>/</span> 목표 시스템</p><h2 id="target-title">요구사항이,<br/>시스템의 구조가 되도록.</h2></div><p class="section-description">사업의 언어를 화면·서비스·데이터로 풀어냅니다.<br/>어떤 요구가 어느 설계에 반영됐는지, 함께 살펴보세요.</p></div>
           <div class="target-case-heading"><div><span class="case-label">가상 프로젝트 · 설계 예시</span><h3>고객 문의를 하나의 포털로.</h3></div><a class="inline-link" href={url('docs/examples/portal/')}>RFP와 산출물 보기 <span aria-hidden="true">↗</span></a></div>
@@ -133,7 +136,7 @@ const resources = [
         </div>
       </section>
 
-      <section class="template-section" id="templates" aria-labelledby="template-title">
+      <section data-reveal class="template-section" id="templates" aria-labelledby="template-title">
         <div class="container template-layout">
           <div class="template-copy"><p class="section-index">04 <span>/</span> 팀의 템플릿</p><h2 id="template-title">잘 만든 자료를,<br/>다음 제안의 기준으로.</h2><p class="template-description">예전 제안서와 발표자료를 폴더에 넣어 주세요.<br class="desktop-only"/> 목차와 문체, 색상과 서체를 읽고 이번 사업에 맞춰 작성합니다.</p><a class="inline-link" href={url('docs/guides/templates/')}>내 템플릿으로 시작하기 <span aria-hidden="true">→</span></a></div>
           <div class="template-reference">
@@ -146,8 +149,10 @@ const resources = [
         </div>
       </section>
 
+      <section class="builder-section" id="start-builder" aria-labelledby="builder-title"><div class="container"><div class="section-intro"><div><p class="section-index">05 <span>/</span> 직접 시작하기</p><h2 id="builder-title">다음 프로젝트의 시작을,<br/>지금 그려보세요.</h2></div><p class="section-description">조건을 선택하면 첫 요청문이 준비됩니다.<br/>실제 작업은 설치한 AI 세션에서 이어갑니다.</p></div><StartBuilder /></div></section>
+
       <section class="container section install-section" id="install" aria-labelledby="install-title">
-        <div class="install-copy"><p class="section-index">05 <span>/</span> 시작하기</p><h2 id="install-title">지금 쓰는 AI에<br/>이음을 더하세요.</h2><ol class="getting-started"><li><span class="mono">01</span><div><strong>플러그인을 한 번 설치합니다.</strong><p>제품을 선택하고 설치 내용을 전달하세요.</p></div></li><li><span class="mono">02</span><div><strong>새 세션에서 업무 폴더를 엽니다.</strong><p>고객 자료는 플러그인 설치 폴더와 분리합니다.</p></div></li><li><span class="mono">03</span><div><strong>RFP나 사업 아이디어를 전합니다.</strong><p>자료 등록과 진행 기록은 에이전트가 처리합니다.</p></div></li></ol></div>
+        <div class="install-copy"><p class="section-index">06 <span>/</span> 설치하기</p><h2 id="install-title">지금 쓰는 AI에<br/>이음을 더하세요.</h2><ol class="getting-started"><li><span class="mono">01</span><div><strong>플러그인을 한 번 설치합니다.</strong><p>제품을 선택하고 설치 내용을 전달하세요.</p></div></li><li><span class="mono">02</span><div><strong>새 세션에서 업무 폴더를 엽니다.</strong><p>고객 자료는 플러그인 설치 폴더와 분리합니다.</p></div></li><li><span class="mono">03</span><div><strong>RFP나 사업 아이디어를 전합니다.</strong><p>자료 등록과 진행 기록은 에이전트가 처리합니다.</p></div></li></ol></div>
         <div class="install-panel">
           <div class="install-tabs" role="tablist" aria-label="설치할 AI 선택"><button type="button" role="tab" id="install-tab-codex" aria-controls="install-codex" aria-selected="true" data-install-tab="codex">Codex</button><button type="button" role="tab" id="install-tab-claude" aria-controls="install-claude" aria-selected="false" tabindex="-1" data-install-tab="claude">Claude Code</button></div>
           <div id="install-codex" role="tabpanel" aria-labelledby="install-tab-codex"><p class="install-instruction">Codex <strong>대화 입력창</strong>에 요청하세요.</p><pre id="codex-request" tabindex="0">Agics-hsjeong/project-lifecycle-agent의 main을
@@ -159,13 +164,14 @@ marketplace로 등록하고 플러그인을 설치해줘.
         </div>
       </section>
 
-      <section class="container resources-section" aria-labelledby="resources-title"><div class="resource-heading"><p class="section-index">06 <span>/</span> 문서와 예제</p><h2 id="resources-title">필요할 때, 바로 찾아보세요.</h2></div><div class="resource-list">{resources.map((resource,i) => <a href={url(resource.path)} download={resource.download || undefined}><span class="resource-index mono">0{i+1}</span><div><h3>{resource.title}</h3><p>{resource.text}</p></div><span class="resource-action">{resource.action}<span aria-hidden="true">{resource.download?'↓':'↗'}</span></span></a>)}</div></section>
+      <section class="container resources-section" aria-labelledby="resources-title"><div class="resource-heading"><p class="section-index">07 <span>/</span> 문서와 예제</p><h2 id="resources-title">필요할 때, 바로 찾아보세요.</h2></div><div class="resource-list">{resources.map((resource,i) => <a href={url(resource.path)} download={resource.download || undefined}><span class="resource-index mono">0{i+1}</span><div><h3>{resource.title}</h3><p>{resource.text}</p></div><span class="resource-action">{resource.action}<span aria-hidden="true">{resource.download?'↓':'↗'}</span></span></a>)}</div></section>
 
       <section class="container faq-section" aria-labelledby="faq-title"><div><p class="section-index">알아두면 좋은 것</p><h2 id="faq-title">시작 전, 궁금한 점.</h2></div><div class="faq-list"><details name="questions"><summary>기존 프로젝트에도 사용할 수 있나요?<span aria-hidden="true">+</span></summary><p>가능합니다. 실제 프로젝트 파일과 현재 상태를 먼저 확인합니다. v2 이행 미리보기와 관리정보 백업을 거치며, 기존 문서·ID·진행 단계를 새 양식으로 덮어쓰지 않습니다. <a href={url('docs/guides/v2/')}>기존 프로젝트 이행 안내 ↗</a></p></details><details name="questions"><summary>제안서와 발표자료도 만들어 주나요?<span aria-hidden="true">+</span></summary><p>RFP와 참고 템플릿을 분석해 정성제안서·발표자료·대본과 제출 점검을 돕습니다. 실제 파일 제작과 전체 출력 검수는 호스트에서 사용할 수 있는 도구로 진행합니다. 텍스트 초안만으로 제출본이 완성됐다고 표시하지 않습니다.</p></details><details name="questions"><summary>프로젝트 자료는 어디에 남나요?<span aria-hidden="true">+</span></summary><p>원본과 산출물, 진행 기록은 사용자가 선택한 프로젝트 폴더에 남습니다. AI에 전달되는 자료는 사용하는 Codex·Claude Code의 데이터 정책과 설정을 따릅니다. 고객 자료를 공개 저장소에 넣지 않도록 별도로 관리하세요.</p></details></div></section>
     </main>
 
-    <footer class="site-footer"><div class="container"><div class="footer-top"><a class="brand" href={url()}><img src={url('brand/symbol.png')} alt="" width="38" height="25"/><span>프로젝트이음</span></a><p>일을 잇는 기록, 프로젝트이음.</p><a class="inline-link" href={`${repo}/issues/new/choose`}>사용 경험 나누기 <span aria-hidden="true">↗</span></a></div><div class="footer-bottom"><span>Project Ieum · 오픈소스 프로젝트 관리 에이전트</span><nav aria-label="하단 메뉴"><a href={repo}>GitHub ↗</a><a href={url('docs/contributing/')}>기여하기</a><a href={`${repo}/blob/main/LICENSE`}>MIT License</a><a href={url('fonts/OFL.txt')}>서체 라이선스</a></nav></div></div></footer>
+    <footer class="site-footer"><div class="container"><div class="footer-top"><Brand /><p>일을 잇는 기록, 프로젝트이음.</p><a class="inline-link" href={`${repo}/issues/new/choose`}>사용 경험 나누기 <span aria-hidden="true">↗</span></a></div><div class="footer-bottom"><span>Project Ieum · 오픈소스 프로젝트 관리 에이전트</span><nav aria-label="하단 메뉴"><a href={repo}>GitHub ↗</a><a href={url('docs/contributing/')}>기여하기</a><a href={`${repo}/blob/main/LICENSE`}>MIT License</a><a href={url('fonts/OFL.txt')}>서체 라이선스</a></nav></div></div></footer>
 
+    <Experience />
     <script>
       function setupTabs(selector: string) {
         const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(selector));

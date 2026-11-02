@@ -1,0 +1,38 @@
+---
+import '../styles/widgets.css';
+const stages=[
+ {id:'input',no:'01',label:'사업과 요구사항',detail:'원문에서 출발하는 기준',files:'RFP · 고객 질문 · 요구사항',description:'RFP와 사업 아이디어에서 범위와 미정 조건을 구분합니다. 원문 근거와 수용 기준을 요구사항에 연결합니다.',code:'inputs/  →  registers/requirements.csv'},
+ {id:'proposal',no:'02',label:'제안과 발표',detail:'팀의 노하우를 담은 설득',files:'정성제안서 · 발표자료 · 평가 대응',description:'선택한 과거 자료의 스타일과 이번 RFP의 평가기준을 연결합니다. 편집본과 제출본을 제작하고 전체 출력을 검수합니다.',code:'templates/  →  proposal/'},
+ {id:'delivery',no:'03',label:'설계와 구현',detail:'약속한 범위를 실제 작업으로',files:'아키텍처 · 화면 · API · 코드',description:'요구사항에서 화면·서비스·데이터를 설계하고 구현합니다. 사용하는 호스트가 실제 파일과 코드를 작성합니다.',code:'REQ  →  DESIGN  →  TASK'},
+ {id:'verify',no:'04',label:'검증과 배포',detail:'결과와 근거를 함께',files:'테스트 근거 · 배포·복구 절차',description:'실제 테스트와 검토 근거로 다음 단계를 판단합니다. 자료·코드가 바뀌면 기존 검토가 유효한지 다시 확인합니다.',code:'review  →  advance  →  release'},
+ {id:'operate',no:'05',label:'인수와 운영',detail:'다음 사람이 이어갈 맥락',files:'매뉴얼 · 변경 기록 · 인수인계',description:'완료 산출물과 운영 문서, 미결정과 다음 작업을 남깁니다. 같은 프로젝트 파일을 읽어 도구를 바꾸어 이어갑니다.',code:'HANDOFF.md  +  state/'},
+];
+---
+<project-explorer class="project-explorer">
+ <div class="explorer-top"><span><i aria-hidden="true"></i> PROJECT CONSTELLATION</span><span>흐름 미리보기</span></div>
+ <div class="constellation" role="group" aria-label="프로젝트 단계 살펴보기">
+  <svg class="constellation-orbits" viewBox="0 0 600 440" fill="none" aria-hidden="true"><defs><linearGradient id="orbit-gradient"><stop stop-color="#8cf3ce"/><stop offset="1" stop-color="#8794f5"/></linearGradient></defs><ellipse cx="300" cy="220" rx="224" ry="162" stroke="#50787d" stroke-opacity=".35"/><ellipse cx="300" cy="220" rx="178" ry="126" stroke="#50787d" stroke-opacity=".25" stroke-dasharray="2 9"/><path d="M300 50L513 170L430 350H170L87 170Z" stroke="url(#orbit-gradient)" stroke-opacity=".45"/><path class="orbit-spoke" d="M300 55V220M510 170L300 220M430 350L300 220M170 350L300 220M90 170L300 220" stroke="url(#orbit-gradient)" stroke-opacity=".3"/><circle cx="300" cy="220" r="84" stroke="#8cf3ce" stroke-opacity=".15"/><circle cx="300" cy="220" r="106" stroke="#8cf3ce" stroke-opacity=".09"/></svg>
+  <div class="constellation-core" aria-hidden="true"><div class="core-plate core-plate-back"></div><div class="core-plate core-plate-mid"></div><div class="core-plate core-plate-front"><svg viewBox="0 0 96 48" fill="none"><rect x="6" y="6" width="34" height="34" rx="11" stroke="#b3ffe1" stroke-width="7"/><rect x="55" y="6" width="34" height="34" rx="11" stroke="#b0bbff" stroke-width="7"/><path d="M36 15C36 29 46 22 51 26Q56 30 59 33" stroke="#b3ffe1" stroke-width="7" stroke-linecap="round"/></svg></div><span>PROJECT IEUM</span></div>
+  {stages.map((stage,i)=><button type="button" disabled class={`orbit-node orbit-node-${i}`} data-explore={stage.id} aria-pressed={i===0?'true':'false'} aria-controls="explorer-detail"><span class="orbit-node-no">{stage.no}</span><span>{stage.label}</span><span class="orbit-node-light" aria-hidden="true"></span></button>)}
+ </div>
+ <div id="explorer-detail" class="explorer-detail" aria-live="polite" aria-atomic="true"><div><span class="explorer-detail-label">{stages[0].detail}</span><h2 class="explorer-detail-title">{stages[0].files}</h2><p class="explorer-detail-description">{stages[0].description}</p></div><code class="explorer-detail-code">{stages[0].code}</code></div>
+ <script type="application/json" class="explorer-data" set:html={JSON.stringify(stages)} />
+</project-explorer>
+<script>
+ class ProjectExplorer extends HTMLElement {
+  connectedCallback() {
+   if(this.dataset.ready)return;this.dataset.ready='true';
+   const stages=JSON.parse(this.querySelector('.explorer-data')?.textContent||'[]');
+   const buttons=Array.from(this.querySelectorAll<HTMLButtonElement>('[data-explore]'));
+   buttons.forEach(button=>button.disabled=false);
+   const choose=(button:HTMLButtonElement)=>{
+    const item=stages.find((stage:{id:string})=>stage.id===button.dataset.explore);if(!item)return;
+    buttons.forEach(b=>b.setAttribute('aria-pressed',String(b===button)));
+    for(const [selector,value] of Object.entries({'.explorer-detail-label':item.detail,'.explorer-detail-title':item.files,'.explorer-detail-description':item.description,'.explorer-detail-code':item.code})){const node=this.querySelector(selector);if(node)node.textContent=String(value);}
+    this.dataset.stage=item.id;
+   };
+   buttons.forEach((button,i)=>{button.addEventListener('click',()=>choose(button));button.addEventListener('keydown',e=>{let next=i;if(e.key==='ArrowRight')next=(i+1)%buttons.length;else if(e.key==='ArrowLeft')next=(i-1+buttons.length)%buttons.length;else return;e.preventDefault();choose(buttons[next]);buttons[next].focus();});});
+  }
+ }
+ if(!customElements.get('project-explorer'))customElements.define('project-explorer',ProjectExplorer);
+</script>

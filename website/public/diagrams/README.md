@@ -22,3 +22,5 @@ python website/scripts/generate-diagrams.py
 생성 소스의 노드·문구·색상·연결 경로를 수정하고 SVG 6개를 함께 커밋한다. 빌드는 커밋된 SVG를 사용한다. 기존 public/brand의 브랜드 자산은 변경하지 않는다.
 
 실제 동작 설명은 docs/V2-IMPLEMENTATION.md와 tools/workflow.py, 목표 시스템은 examples/customer-portal/RFP.md에 대조한다. 고객 포털은 설명용이며 구축 완료·인증 제품 선정·운영 승인을 의미하지 않는다.
+
+현재 첫 화면은 src/components/ProjectExplorer.astro의 인터랙티브 장면이다. 정적 project-fabric.svg와 세로형 원본은 발표·문서 등에서 재사용할 수 있도록 유지한다.

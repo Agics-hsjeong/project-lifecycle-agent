@@ -1,0 +1,779 @@
+@import './tokens.css';
+/* The presentation layer shares its material palette with the knowledge base. */
+:root {
+  --ink:#19353b;
+  --muted:#546c77;
+  --line:#d9e3e4;
+  --soft:#edf3f3;
+  --paper:#f8faf9;
+  --accent:#08747b;
+  --accent-dark:#075f68;
+}
+body {
+  background:var(--paper)
+}
+.site-header {
+  background:#07171ded;
+  border-bottom:1px solid #49687940;
+  backdrop-filter:blur(20px);
+  color:#eaf7f4
+}
+.header-inner {
+  height:82px;
+  gap:26px
+}
+.desktop-nav {
+  gap:25px;
+  font-size:13px;
+  color:#b8cdd4
+}
+.desktop-nav a:hover {
+  color:#b9ffdf
+}
+.external-link span {
+  color:#b5c5df
+}
+.header-install.button {
+  border-radius:8px;
+  color:#baf9dc;
+  background:#284c4a;
+  border:1px solid #6fa39466;
+  min-height:40px;
+  font-size:12px
+}
+.header-install.button:hover {
+  background:#38625b;
+  border-color:#b0ebce
+}
+.hero-stage {
+  isolation:isolate;
+  position:relative;
+  overflow:hidden;
+  background:#07171d;
+  color:#eefbf7;
+  --spot-x:68%;
+  --spot-y:35%;
+}
+.hero-stage::before {
+  content:'';
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  background:radial-gradient(ellipse 650px 560px at var(--spot-x) var(--spot-y),#245a5a30,transparent 75%),linear-gradient(115deg,#07171d 15%,#0c232e 66%,#101f36);
+}
+.hero-stage::after {
+  content:'';
+  position:absolute;
+  inset:0;
+  z-index:-1;
+  opacity:.13;
+  background-image:linear-gradient(#7aa8b633 1px,transparent 1px),linear-gradient(90deg,#7aa8b633 1px,transparent 1px);
+  background-size:72px 72px;
+  mask-image:linear-gradient(110deg,transparent 15%,#000 90%);
+  pointer-events:none;
+}
+.hero-atmosphere {
+  position:absolute;
+  inset:0;
+  overflow:hidden;
+  pointer-events:none;
+  z-index:-1
+}
+.hero-atmosphere span {
+  position:absolute;
+  border:1px solid #79d5b621;
+  border-radius:50%;
+  width:800px;
+  height:800px;
+  right:-190px;
+  top:-210px;
+  transform:rotate(-25deg);
+  box-shadow:0 0 100px #6782c409,inset 0 0 80px #74e2bd08
+}
+.hero-atmosphere span+span {
+  width:620px;
+  height:620px;
+  right:-100px;
+  top:-120px;
+  border-color:#b3b9ff1a
+}
+.hero {
+  grid-template-columns:.95fr 1.15fr;
+  gap:65px;
+  padding-block:67px 65px;
+  align-items:center;
+  position:relative
+}
+.hero-copy {
+  padding-top:5px
+}
+.release-link {
+  color:#bfd5df;
+  border:1px solid #52798066;
+  background:#1e3e4550;
+  border-radius:30px;
+  padding:6px 11px;
+  font-size:10px;
+  gap:8px;
+  line-height:1.5
+}
+.release-mark {
+  background:#9bf1ca;
+  box-shadow:0 0 10px #8cf3ce55;
+  border-radius:50%;
+  width:5px;
+  height:5px
+}
+.release-divider {
+  color:#9eb3bf
+}
+.release-link:hover {
+  color:white
+}
+.hero-kicker {
+  color:#a2c7ca;
+  font-size:9px!important;
+  margin-top:32px;
+  letter-spacing:.11em
+}
+.hero h1 {
+  font-size:clamp(47px,4.7vw,69px);
+  line-height:1.2;
+  font-weight:610;
+  letter-spacing:-.065em;
+  margin-top:22px
+}
+.hero h1 span {
+  font-weight:500;
+  background:linear-gradient(105deg,#acffda 0%,#b3c5ff 100%);
+  background-clip:text;
+  -webkit-background-clip:text;
+  color:transparent
+}
+.hero-description {
+  font-size:18px;
+  color:#b8d0d7;
+  line-height:1.9;
+  margin-top:26px
+}
+.hero-definition {
+  font-size:11px;
+  color:#9abac5;
+  margin-top:17px
+}
+.hero-actions {
+  margin-top:34px;
+  gap:24px
+}
+.hero-actions .button {
+  color:#103831;
+  background:#b0f3d1;
+  border-color:#b0f3d1;
+  border-radius:9px;
+  box-shadow:0 5px 25px #81e5b31c;
+  font-size:14px;
+  min-height:53px
+}
+.hero-actions .button:hover {
+  background:#d3ffe8;
+  box-shadow:0 5px 30px #81e5b333
+}
+.hero-actions .inline-link {
+  font-size:12px;
+  color:#c0d3e2;
+  gap:15px
+}
+.hero-actions .inline-link:hover {
+  color:#a1f0c9
+}
+.hero-stage .principle-strip {
+  border-color:#45636d55;
+  padding-block:23px;
+  margin-bottom:0;
+  color:#b9d0d6
+}
+.hero-stage .principle-strip>p {
+  font-size:13px;
+  color:#c6e1dc;
+  font-weight:400
+}
+.hero-stage .principle-strip ul {
+  color:#9fbec7;
+  font-size:11px
+}
+.hero-stage .principle-strip li+li {
+  border-color:#45636d66
+}
+h2 {
+  font-weight:580;
+  letter-spacing:-.05em
+}
+.section-index {
+  font-size:11px;
+  letter-spacing:.04em;
+  color:#4e6976
+}
+.section-index::before {
+  content:'';
+  width:5px;
+  height:5px;
+  border-radius:1px;
+  background:#2b9390;
+  align-self:center;
+  box-shadow:0 0 0 4px #2b939011
+}
+.section-index>span {
+  color:#93aab1
+}
+.section-description {
+  font-size:14px;
+  line-height:1.9;
+  color:#526d79
+}
+.section-intro {
+  margin-bottom:40px
+}
+.architecture-section {
+  background:#091d25;
+  color:#f1fbf8;
+  padding-block:90px 75px
+}
+.architecture-section .section-index {
+  color:#a8c8d0
+}
+.architecture-section .section-index::before {
+  background:#9bf1ca;
+  box-shadow:0 0 12px #9bf1ca33
+}
+.architecture-intro>p {
+  color:#adc8d2
+}
+.architecture-intro .inline-link {
+  color:#c9d3fd
+}
+.technical-figure {
+  border-radius:18px;
+  border:1px solid #46667488;
+  box-shadow:0 22px 55px -35px #020f17aa
+}
+.figure-toolbar {
+  background:#102b35;
+  color:#b1cbd5;
+  border-color:#365461;
+  padding:21px 27px
+}
+.architecture-figure figcaption {
+  background:#102b35;
+  border-color:#365461;
+  color:#b4cdd4
+}
+.engineering-notes {
+  padding-top:40px;
+  gap:38px
+}
+.engineering-notes li+li {
+  border-color:#34515f
+}
+.engineering-notes .mono {
+  color:#9fdccc
+}
+.engineering-notes p {
+  color:#aac6d2
+}
+.engineering-notes h3 {
+  font-size:19px
+}
+.technical-figure[data-spotlight] {
+  --spot-x:50%;
+  --spot-y:0%;
+}
+.workflow-section {
+  padding-block:95px
+}
+.profile-tabs {
+  border-bottom:0;
+  background:#eaf0f1;
+  border:1px solid #d6e2e5;
+  border-radius:12px;
+  gap:5px;
+  padding:6px
+}
+.profile-tabs button {
+  border:0!important;
+  margin:0;
+  padding:16px 20px;
+  border-radius:8px;
+  min-height:53px;
+  font-size:15px
+}
+.profile-tabs button[aria-selected='true'] {
+  background:#fff;
+  color:#123c45;
+  box-shadow:0 3px 10px #23485714
+}
+.profile-tabs button>span {
+  font-size:13px
+}
+.profile-panel {
+  padding:38px 10px;
+  gap:85px
+}
+.stage-count {
+  padding:6px 10px;
+  border:1px solid #b6d9d6;
+  border-radius:25px;
+  background:#ecf6f1;
+  font-size:10px
+}
+.profile-description h3 {
+  font-size:27px;
+  font-weight:550;
+  letter-spacing:-.045em;
+  max-width:320px
+}
+.phase-title>span {
+  background:#eaf5f2;
+  border-color:#c2dcd4;
+  color:#2b6f5e
+}
+.handoff-note {
+  border-radius:13px;
+  background:linear-gradient(115deg,#edf7f1,#eef1fa);
+  border-color:#d4e3e1;
+  padding:25px
+}
+.handoff-mark {
+  background:#fff;
+  border:1px solid #ccdcd7;
+  display:grid;
+  place-items:center;
+  width:38px;
+  height:38px;
+  font-size:24px;
+  border-radius:10px
+}
+.target-section {
+  background:#edf3f4;
+  border-color:#d8e4e7;
+  padding-block:90px 75px
+}
+.case-label {
+  background:#fafdff;
+  border-color:#bad0d8;
+  color:#386674;
+  border-radius:5px
+}
+.target-figure {
+  border-color:#c4d8db;
+  border-radius:16px
+}
+.target-figure figcaption {
+  background:#f7fbfb;
+  border-color:#cedee2;
+  color:#385d6b
+}
+.target-case-heading {
+  border-color:#c7d9dd
+}
+.system-lens button {
+  border-radius:25px;
+  min-height:42px
+}
+.system-lens button[aria-pressed='true'] {
+  background:#174851;
+  border-color:#174851
+}
+.system-lens button:hover {
+  border-color:#81adaf
+}
+.requirement-thread {
+  border-color:#ccdfe0;
+  border-left-color:#25857e;
+  border-radius:12px;
+  box-shadow:0 10px 25px -20px #193c4b44
+}
+.system-disclaimer {
+  color:#4e6a77
+}
+.template-section {
+  padding-block:100px
+}
+.template-reference {
+  border-radius:20px;
+  padding:32px;
+  background:linear-gradient(130deg,#fff,#edf4f1);
+  border-color:#d4e2df;
+  box-shadow:0 22px 55px -35px #254e5d66
+}
+.folder-heading {
+  padding-bottom:23px
+}
+.folder-row {
+  padding-block:24px
+}
+.file-type {
+  border-radius:5px;
+  position:relative;
+  background:#f3fcf8;
+  border-color:#8eb9b4
+}
+.template-steps strong {
+  font-weight:550
+}
+.template-steps span {
+  color:#4b6976
+}
+.builder-section {
+  padding-block:85px 90px;
+  background:#edf2f5;
+  border-block:1px solid #d9e3e8
+}
+.builder-section .section-intro {
+  margin-bottom:36px
+}
+.builder-section .start-builder {
+  border-radius:24px
+}
+.install-section {
+  padding-block:95px
+}
+.install-panel {
+  border:1px solid #d0e0df;
+  border-radius:18px;
+  background:white;
+  box-shadow:var(--ieum-shadow)
+}
+.install-tabs {
+  background:#edf4f3;
+  border-color:#d4e1df
+}
+.install-panel pre {
+  border-radius:10px;
+  background:#f0f5f5;
+  color:#173941
+}
+.copy-button {
+  border-radius:8px;
+  background:#145a63
+}
+.install-version {
+  background:#f2f7f5;
+  border-color:#d5e5e1
+}
+.resources-section {
+  padding-block:0 90px
+}
+.resource-list>a {
+  position:relative;
+  transition:padding .2s,background .2s
+}
+.resource-list>a:hover {
+  padding-inline:18px;
+  background:#edf5f4
+}
+.resource-heading h2,.faq-section h2 {
+  font-size:34px
+}
+.faq-section {
+  padding-bottom:90px
+}
+.faq-list summary {
+  font-size:16px
+}
+.site-footer {
+  background:#07171d;
+  color:#e1f4ef;
+  border-color:#24434e
+}
+.footer-top {
+  padding-block:40px
+}
+.footer-top>p,.footer-bottom {
+  color:#abc6cf
+}
+.footer-top .inline-link {
+  color:#b3efcf
+}
+.footer-bottom {
+  border-color:#34535e
+}
+.footer-bottom a:hover {
+  color:#b0f8d8
+}
+.motion-ready [data-reveal] {
+  opacity:0;
+  transform:translateY(25px);
+  transition:opacity .75s var(--ieum-ease),transform .75s var(--ieum-ease)
+}
+.motion-ready [data-reveal].is-visible,.motion-ready [data-reveal]:focus-within {
+  opacity:1;
+  transform:none
+}
+@media(max-width:1200px) {
+  .desktop-nav {
+    gap:18px;
+    font-size:12px
+  }
+  .header-inner {
+    gap:23px
+  }
+  .hero {
+    gap:35px;
+    padding-block:55px
+  }
+  .hero h1 {
+    font-size:53px
+  }
+  .hero-kicker {
+    font-size:8px!important;
+    letter-spacing:.06em
+  }
+  .hero-description {
+    font-size:16px
+  }
+  .hero-actions {
+    gap:21px
+  }
+  .hero-actions .button {
+    font-size:13px;
+    gap:17px;
+    padding-inline:16px
+  }
+  .profile-panel {
+    gap:45px
+  }
+  .hero-actions .inline-link {
+    font-size:11px
+  }
+}
+@media(max-width:950px) and (min-width:801px) {
+  .header-inner {
+    gap:18px
+  }
+  .desktop-nav {
+    gap:13px;
+    font-size:11px
+  }
+  .header-inner .ieum-brand-word {
+    font-size:16px
+  }
+  .header-inner .ieum-brand-mark {
+    width:37px
+  }
+  .header-inner .ieum-brand-word small {
+    font-size:7px
+  }
+  .hero h1 {
+    font-size:45px
+  }
+  .hero-description {
+    font-size:15px
+  }
+  .hero-actions {
+    flex-direction:column;
+    align-items:flex-start
+  }
+  .hero-kicker {
+    font-size:7px!important;
+    letter-spacing:.04em
+  }
+}
+@media(max-width:800px) {
+  .header-inner {
+    height:74px
+  }
+  .site-header .mobile-menu summary {
+    color:#d8ede7
+  }
+  .menu-lines::before,.menu-lines::after {
+    background:#c4e3d9!important
+  }
+  .mobile-menu nav {
+    background:#0b232c;
+    top:73px;
+    border-color:#355461;
+    box-shadow:0 20px 35px #03151f55
+  }
+  .mobile-menu nav a {
+    color:#cfe7e5;
+    font-size:14px
+  }
+  .hero {
+    grid-template-columns:1fr;
+    padding-block:40px 35px;
+    gap:42px
+  }
+  .hero-copy {
+    padding:0
+  }
+  .hero h1 {
+    font-size:clamp(36px,8vw,57px);
+    margin-top:22px
+  }
+  .hero-kicker {
+    font-size:8px!important;
+    letter-spacing:.09em;
+    margin-top:26px
+  }
+  .hero-description {
+    font-size:16px;
+    line-height:1.85;
+    margin-top:24px
+  }
+  .hero-definition {
+    font-size:11px;
+    line-height:1.8;
+    max-width:330px
+  }
+  .hero-actions {
+    gap:22px;
+    margin-top:27px
+  }
+  .hero-actions .button {
+    font-size:13px;
+    min-height:50px
+  }
+  .hero-actions .inline-link {
+    font-size:12px
+  }
+  .hero-stage .principle-strip {
+    padding-block:23px
+  }
+  .hero-stage .principle-strip ul {
+    font-size:10px
+  }
+  .architecture-section {
+    padding-block:62px 50px
+  }
+  .architecture-section h2 {
+    font-size:34px
+  }
+  .engineering-notes h3 {
+    font-size:18px
+  }
+  .workflow-section {
+    padding-block:62px
+  }
+  .profile-tabs {
+    gap:3px;
+    padding:5px
+  }
+  .profile-tabs button {
+    padding:13px 9px;
+    min-height:46px;
+    font-size:13px;
+    justify-content:center
+  }
+  .profile-panel {
+    padding:29px 0;
+    gap:28px
+  }
+  .profile-description h3 {
+    font-size:24px;
+    max-width:none
+  }
+  .handoff-note {
+    padding:21px
+  }
+  .handoff-mark {
+    width:27px;
+    height:31px;
+    font-size:20px
+  }
+  .target-section {
+    padding-block:62px 50px
+  }
+  .technical-figure {
+    border-radius:12px
+  }
+  .template-section {
+    padding-block:65px
+  }
+  .template-reference {
+    padding:25px
+  }
+  .builder-section {
+    padding-block:60px
+  }
+  .builder-section .section-description {
+    margin-top:20px
+  }
+  .install-section {
+    padding-block:65px
+  }
+  .resources-section {
+    padding-bottom:65px
+  }
+  .resource-heading h2,.faq-section h2 {
+    font-size:29px
+  }
+  .faq-section {
+    padding-bottom:65px
+  }
+  .footer-top {
+    padding-block:32px
+  }
+  .footer-top>p {
+    font-size:14px
+  }
+  .site-footer .ieum-brand-word {
+    font-size:18px
+  }
+}
+@media(max-width:370px) {
+  .hero h1 {
+    font-size:33px
+  }
+  .hero-kicker {
+    font-size:7px!important;
+    letter-spacing:.04em
+  }
+  .hero-actions {
+    gap:16px
+  }
+  .hero-actions .inline-link {
+    font-size:11px
+  }
+  .hero-actions .button {
+    font-size:12px;
+    padding-inline:13px
+  }
+  .hero-definition {
+    font-size:10px
+  }
+  .profile-tabs button {
+    font-size:11px;
+    padding-inline:6px
+  }
+  .template-reference {
+    padding:21px 18px
+  }
+  .header-inner .ieum-brand-word {
+    font-size:16px
+  }
+  .header-inner .ieum-brand-mark {
+    width:34px
+  }
+}
+@media(prefers-reduced-motion:reduce) {
+  .motion-ready [data-reveal] {
+    opacity:1;
+    transform:none;
+    transition:none
+  }
+  .resource-list>a {
+    transition:none
+  }
+  :root {
+    scroll-behavior:auto
+  }
+}
+@media print {
+  .motion-ready [data-reveal] {
+    opacity:1;
+    transform:none
+  }
+  .hero-atmosphere {
+    display:none
+  }
+}

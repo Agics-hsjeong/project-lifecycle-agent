@@ -1,0 +1,18 @@
+---
+import DefaultFooter from '@astrojs/starlight/components/Footer.astro';
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+const {entry}=Astro.locals.starlightRoute;
+const feedback=`https://github.com/Agics-hsjeong/project-lifecycle-agent/issues/new?title=${encodeURIComponent('[문서 피드백] '+entry.data.title)}&body=${encodeURIComponent('문서: '+new URL(Astro.url.pathname,Astro.site).href+'\n\n개선 의견:\n')}`;
+---
+<div class="docs-help-panel"><span class="docs-help-symbol" aria-hidden="true">↗</span><div><h2>다음 작업도 이어서.</h2><p>예제를 살펴보거나, 문서에서 부족한 부분을 알려주세요.</p></div><nav aria-label="도움말 링크"><a href={`${base}/docs/examples/portal/`}>공개 예제</a><a href={feedback}>문서 피드백 <span aria-hidden="true">↗</span></a></nav></div>
+<DefaultFooter/>
+<button type="button" class="back-to-top" data-back-to-top aria-label="페이지 맨 위로 이동" hidden>↑</button>
+<script>
+ const content=document.querySelector('.sl-markdown-content');const bar=document.querySelector<HTMLElement>('.reading-progress>span');const topButton=document.querySelector<HTMLButtonElement>('[data-back-to-top]');
+ // Floating control must live outside Starlight's isolated main pane and fixed TOC.
+ if(topButton)document.body.append(topButton);
+ let queued=false;const update=()=>{queued=false;const start=content?content.getBoundingClientRect().top+scrollY:0;const end=content?content.getBoundingClientRect().bottom+scrollY-innerHeight:document.documentElement.scrollHeight-innerHeight;const progress=Math.max(0,Math.min(1,(scrollY-start)/Math.max(1,end-start)));if(bar)bar.style.transform=`scaleX(${progress})`;if(topButton)topButton.hidden=scrollY<600;};
+ addEventListener('scroll',()=>{if(!queued){queued=true;requestAnimationFrame(update)}},{passive:true});addEventListener('resize',update);update();
+ topButton?.addEventListener('click',()=>{window.scrollTo({top:0,behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});document.getElementById('_top')?.setAttribute('tabindex','-1');document.getElementById('_top')?.focus({preventScroll:true});});
+ document.querySelector<HTMLButtonElement>('[data-copy-page]')?.addEventListener('click',async()=>{const feedback=document.querySelector('.page-copy-feedback');try{await navigator.clipboard.writeText(location.href);if(feedback)feedback.textContent='문서 링크를 복사했습니다.';}catch{if(feedback)feedback.textContent='주소창에서 문서 링크를 복사해 주세요.';}});
+</script>

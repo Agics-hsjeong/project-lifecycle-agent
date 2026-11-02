@@ -15,6 +15,7 @@ export default defineConfig({
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/Agics-hsjeong/project-lifecycle-agent' }],
       editLink: { baseUrl: 'https://github.com/Agics-hsjeong/project-lifecycle-agent/edit/main/website/' },
       customCss: ['./src/styles/docs.css'],
+      components: { Header: './src/components/docs/Header.astro', Sidebar: './src/components/docs/Sidebar.astro', PageTitle: './src/components/docs/PageTitle.astro', Footer: './src/components/docs/Footer.astro' },
       sidebar: [
         { label: '처음 시작하기', items: [
           { label: '전체 흐름', slug: 'docs/start' },
