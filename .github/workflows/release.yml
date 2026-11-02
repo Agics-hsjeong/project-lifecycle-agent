@@ -1,0 +1,80 @@
+name: Release plugin
+
+on:
+  push:
+    tags: ['v[0-9]*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test
+        run: python -m unittest discover -s tests -v
+        env:
+          PYTHONUTF8: '1'
+      - name: Validate release and build assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          PYTHONUTF8: '1'
+        run: |
+          python tools/check_release.py --site
+          python tools/package_plugin.py
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, shutil
+          version = json.loads(Path('plugin.json').read_text())['version']
+          assert os.environ['RELEASE_TAG'] == 'v' + version, 'Tag and manifest version differ'
+          folder = Path('dist')
+          manual = folder / f'project-ieum-user-guide-v{version}.pdf'
+          shutil.copy2('website/public/downloads/project-ieum-user-guide.pdf', manual)
+          files = [folder / f'project-lifecycle-agent-v{version}.zip', manual]
+          checksums = '\n'.join(f'{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}' for p in files)
+          (folder / 'SHA256SUMS.txt').write_text(checksums + '\n', encoding='utf-8')
+          PY
+      - name: Publish verified release assets
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const crypto = require('crypto');
+            const version = JSON.parse(fs.readFileSync('plugin.json', 'utf8')).version;
+            const tag = `v${version}`;
+            const prerelease = version.includes('-');
+            const files = [`project-lifecycle-agent-v${version}.zip`, `project-ieum-user-guide-v${version}.pdf`, 'SHA256SUMS.txt'];
+            const log = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const section = log.split(`## ${version}`)[1]?.split('\n## ')[0] || '';
+            const body = `프로젝트이음 ${tag}\n\n${prerelease ? '베타 프리릴리스입니다. 안정판과 구분해 사용하세요.\n\n' : ''}${section.replace(/^.*\n/, '')}\n\nZIP·매뉴얼·SHA256SUMS.txt를 제공합니다. 기존 프로젝트는 이행 미리보기·관리정보 백업 후 적용하세요. 설치 후 새 Codex 채팅·Claude Code 세션에서 사용합니다.\n\n[사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/guides/v2/)`;
+            const { owner, repo } = context.repo;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({ owner, repo, tag_name: tag, target_commitish: context.sha, name: `Project Ieum ${tag}`, body, draft: true, prerelease, make_latest: prerelease ? 'false' : 'true' })).data;
+            }
+            const assets = (await github.rest.repos.listReleaseAssets({ owner, repo, release_id: release.id })).data;
+            for (const name of files) {
+              const data = fs.readFileSync(`dist/${name}`);
+              const digest = 'sha256:' + crypto.createHash('sha256').update(data).digest('hex');
+              const existing = assets.find(asset => asset.name === name);
+              if (existing) {
+                if (existing.digest !== digest) throw new Error(`Published asset differs: ${name}; refusing replacement`);
+                continue;
+              }
+              await github.rest.repos.uploadReleaseAsset({ owner, repo, release_id: release.id, name, data, headers: { 'content-type': name.endsWith('.zip') ? 'application/zip' : name.endsWith('.pdf') ? 'application/pdf' : 'text/plain', 'content-length': data.length } });
+            }
+            await github.rest.repos.updateRelease({ owner, repo, release_id: release.id, draft: false, prerelease, body, make_latest: prerelease ? 'false' : 'true' });
+            core.notice(`Published ${release.html_url}`);

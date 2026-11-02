@@ -10,7 +10,11 @@
 
 사용자는 업무 자료·목표·사업 결정을 전달합니다. 에이전트는 폴더 생성, 원본 등록, 분석, 산출물 제작, 검수와 진행 기록을 처리합니다. 일상적으로 PowerShell 명령을 입력하거나 JSON·CSV를 편집할 필요는 없습니다.
 
-현재 코드 버전: **0.5.1** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
+현재 베타 버전: **2.0.0-beta.1** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
+
+v2 베타 버전입니다. SI·제품·API·유지보수 프로필, 릴리스 범위, 실행·중단·재개, 변경 복원, 제안 출력 검수와 로컬 현황을 제공합니다. 기존 프로젝트는 **“설치 버전을 확인하고, 이 프로젝트의 v2 이행 미리보기를 확인한 뒤 백업하고 적용해줘”**라고 요청하세요. 관리 버전만 갱신하며 기존 문서·ID·단계를 새 기본형으로 덮어쓰지 않습니다.
+
+**베타 버전이므로 기존 안정판과 구분해 사용하세요.** 재현 가능한 설치에는 `v2.0.0-beta.1` 태그를 지정하고, 기존 설치는 실제 로딩 버전을 확인한 뒤 업데이트하세요. [베타 릴리스와 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.1) [v2 사용·이행 안내](docs/V2-IMPLEMENTATION.md) · [검증 기록](docs/VALIDATION.md)
 
 ## 처음 사용한다면 이 순서로 진행하세요
 

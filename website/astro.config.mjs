@@ -23,6 +23,7 @@ export default defineConfig({
           { label: '첫 프로젝트 만들기', slug: 'docs/first-project' },
         ] },
         { label: '업무별 가이드', items: [
+          { label: 'v2 사용과 업데이트', slug: 'docs/guides/v2' },
           { label: '자기 템플릿 활용', slug: 'docs/guides/templates' },
           { label: '제안서와 발표자료', slug: 'docs/guides/proposal' },
           { label: '수주부터 유지보수까지', slug: 'docs/guides/lifecycle' },

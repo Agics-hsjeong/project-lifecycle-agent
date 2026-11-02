@@ -12,6 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from tools.storage import consistent_read
 BLUEPRINT = ROOT / "blueprint"
 STAGES = {
     "discovery": ("사업 검토", ["DEL-001"]),
@@ -37,9 +38,10 @@ REQ_STATES = {"proposed", "baselined", "implemented", "verified", "accepted", "d
 DEL_STATES = {"draft", "in_review", "approved", "not_applicable"}
 
 
-def required_deliverables(data, stage):
+def required_deliverables(data, stage, deliverables=()):
     from tools import proposal
-    return STAGES[stage][1] + (proposal.EXTRA_IDS if stage == "proposal" and proposal.enabled(data) else [])
+    defaults = STAGES[stage][1] + (proposal.EXTRA_IDS if stage == "proposal" and proposal.enabled(data) else [])
+    return list(dict.fromkeys(defaults + [row["deliverable_id"] for row in deliverables if row["stage"] == stage]))
 
 
 def now():
@@ -100,7 +102,7 @@ def local_file(folder, value):
     return target
 
 
-def init_project(parent, slug, name, business_type, rfp=None):
+def init_project(parent, slug, name, business_type, rfp=None, profile=None):
     if not re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", slug):
         raise ValueError("slug는 영문 소문자로 시작하고 소문자·숫자·하이픈만 사용합니다.")
     if slug.upper() in {"CON", "PRN", "AUX", "NUL", *[f"COM{i}" for i in range(1, 10)], *[f"LPT{i}" for i in range(1, 10)]}:
@@ -122,6 +124,11 @@ def init_project(parent, slug, name, business_type, rfp=None):
         data = json.loads((target / "project.json").read_text(encoding="utf-8"))
         data.update(project_id=slug, name=name.strip(), business_type=business_type,
                     created_at=now(), updated_at=now())
+        if profile is not None:
+            from tools.workflow import PROFILES
+            if profile not in PROFILES:
+                raise ValueError("알 수 없는 업무 프로필입니다.")
+            data["workflow"] = {"profile": profile}
         (target / "project.json").write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if source:
             input_dir = target / "inputs" / "rfp"
@@ -147,6 +154,7 @@ def init_project(parent, slug, name, business_type, rfp=None):
     return target
 
 
+@consistent_read
 def check_project(folder, selected_stage=None, *, tables_override=None, include_review=True, check_snapshots=True):
     folder, data = load_project(folder)
     stage = selected_stage or data["current_stage"]
@@ -184,7 +192,16 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
     if not requirements:
         issues.append("requirements: 분석한 실제 요구사항을 최소 1개 등록하세요.")
     order = list(STAGES).index(stage)
-    active = [row for row in requirements if row["status"] != "deferred"]
+    from tools import workflow
+    if stage not in workflow.stages(data):
+        raise ValueError("현재 업무 프로필에 없는 단계입니다.")
+    if "workflow" in data:
+        workflow.validate(data["workflow"], data, tables)
+    issues.extend(workflow.gate_issues(folder, data, tables, stage))
+    if order <= 3:
+        from tools.inputs import gate_issues
+        issues.extend(gate_issues(folder))
+    active = [row for row in requirements if row["status"] != "deferred" and workflow.selected(data, row, stage)]
     if requirements and not active:
         issues.append("requirements: 모든 요구사항이 제외되어 있습니다. 진행 범위를 확인하세요.")
     for row in requirements:
@@ -197,6 +214,8 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
         if row["status"] == "deferred":
             if missing(row["exclusion_reason"]):
                 issues.append(f"{rid}: 범위 제외 사유 누락")
+            continue
+        if not workflow.selected(data, row, stage):
             continue
         if order >= 3 and row["status"] == "proposed":
             issues.append(f"{rid}: 기획 이후 요구사항 기준선(baselined) 필요")
@@ -222,7 +241,7 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
                     issues.append(f"{rid}: {identifier}의 역방향 요구사항 연결 누락")
                 files(f"{rid}/{identifier}", linked["path"], required=True, inspect_template=True)
 
-    required = set(required_deliverables(data, stage))
+    required = set(required_deliverables(data, stage, deliverables))
     for identifier in sorted(required - del_ids):
         issues.append(f"{stage}: 필수 산출물 행 누락 {identifier}")
     for row in deliverables:
@@ -291,6 +310,7 @@ def check_project(folder, selected_stage=None, *, tables_override=None, include_
     return data, stage, issues
 
 
+@consistent_read
 def print_status(folder):
     folder, data = load_project(folder)
     deliverables = read_table(folder, "deliverables")
@@ -302,6 +322,7 @@ def print_status(folder):
     print(f"  {folder}")
 
 
+@consistent_read
 def print_context(folder):
     folder, data = load_project(folder)
     print_status(folder)
@@ -309,7 +330,7 @@ def print_context(folder):
     print("\n먼저 읽을 파일: AGENTS.md, project.json, HANDOFF.md, process/RULES.md, process/WORKFLOW.md, process/ROLES.md")
     print("현재 단계 산출물:")
     for row in read_table(folder, "deliverables"):
-        if row["deliverable_id"] in required_deliverables(data, stage):
+        if row["deliverable_id"] in required_deliverables(data, stage, read_table(folder, "deliverables")):
             print(f"- {row['deliverable_id']} | {row['path']} | {row['status']}")
     print("\n작업 요청: 현재 단계를 확인하고 근거·가정·질문을 구분해 진행해줘. 관련 원장과 HANDOFF.md를 갱신해줘.")
     print("이 출력은 읽기 목록입니다. 실제 입력·인수인계 파일을 읽어야 하며 대화 첨부만으로 로컬 저장되지는 않습니다.")
@@ -325,6 +346,7 @@ def main(argv=None):
     create.add_argument("--type", choices=["si", "product"], default="si")
     create.add_argument("--workspace", type=Path, default=Path.cwd(), help="고객 프로젝트를 저장할 작업 공간 (플러그인 설치 경로와 분리)")
     create.add_argument("--rfp", type=Path, help="새 프로젝트 inputs에 보존할 원본 파일")
+    create.add_argument("--profile", choices=("si", "product", "api", "maintenance"), help="실제로 진행할 업무 단계. 생략하면 기존 11단계 유지")
     status = commands.add_parser("status", help="프로젝트 현황")
     status.add_argument("project", nargs="?")
     check = commands.add_parser("check", help="문서와 원장 구조 점검")
@@ -347,9 +369,9 @@ def main(argv=None):
             return 1 if args.command == "doctor" and not result["ready"] else 0
         if args.command == "init":
             parts = [part.lower() for part in args.workspace.resolve().parts]
-            if args.workspace.resolve() == ROOT or any(parts[index:index + 3] in ([".codex", "plugins", "cache"], [".claude", "plugins", "cache"]) for index in range(len(parts) - 2)):
+            if args.workspace.resolve().is_relative_to(ROOT.resolve()) or any(parts[index:index + 3] in ([".codex", "plugins", "cache"], [".claude", "plugins", "cache"]) for index in range(len(parts) - 2)):
                 raise ValueError("플러그인 소스·캐시와 분리된 사용자 작업 공간을 지정하세요.")
-            target = init_project(args.workspace / "projects", args.slug, args.name, args.type, args.rfp)
+            target = init_project(args.workspace / "projects", args.slug, args.name, args.type, args.rfp, args.profile)
             if args.json:
                 print(json.dumps({"path": str(target), "project_id": args.slug, "stage": "discovery"}, ensure_ascii=False))
             else:

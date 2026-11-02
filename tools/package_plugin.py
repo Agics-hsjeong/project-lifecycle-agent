@@ -25,9 +25,25 @@ def package(output=None):
     destination = Path(output) if output else ROOT / "dist" / f"{metadata['name']}-v{metadata['version']}.zip"
     destination.parent.mkdir(parents=True, exist_ok=True)
     prefix = Path(metadata["name"])
-    paths = [ROOT / item for item in FILES]
-    for item in FOLDERS:
-        paths.extend(path for path in (ROOT / item).rglob("*") if "__pycache__" not in path.parts and path.suffix != ".pyc")
+    inventory = json.loads((ROOT / "tools/package-files.json").read_text(encoding="utf-8"))
+    if not isinstance(inventory, list) or any(not isinstance(item, str) for item in inventory) or len(set(inventory)) != len(inventory):
+        raise ValueError("배포 파일 허용 목록 형식이 잘못되었습니다.")
+    paths = []
+    for item in inventory:
+        relative = Path(item)
+        if relative.is_absolute() or ".." in relative.parts or "\\" in item or ":" in item:
+            raise ValueError("배포 파일 경로가 잘못되었습니다.")
+        if set(relative.parts).intersection({"projects", "reference-templates", ".test-output", "__pycache__", "node_modules", "output"}) or any(
+            part.startswith(".env") and part != ".env.example" for part in relative.parts):
+            raise ValueError("고객·환경·실행 자료를 배포할 수 없습니다.")
+        if item not in FILES and relative.parts[0] not in FOLDERS:
+            raise ValueError("배포 폴더 허용 범위를 벗어났습니다.")
+        path = ROOT / item
+        if not path.is_file():
+            raise ValueError(f"배포 허용 파일 누락: {item}")
+        paths.append(path)
+    if not set(FILES).issubset(inventory):
+        raise ValueError("배포 필수 파일이 허용 목록에 없습니다.")
     for path in paths:
         current = path
         while current != ROOT:

@@ -1,3 +1,4 @@
+from revision_fixtures import apply_current
 """Synthetic reference documents and images; not claims of visual fidelity."""
 import base64
 import json
@@ -91,8 +92,8 @@ class ReferenceTemplateTests(unittest.TestCase):
         self.assertEqual(result["selection"]["qualitative"], "")
         identifier = result["imported"][0]["id"]
         with self.assertRaises(ValueError):
-            lifecycle.apply_patch(self.project, {"template_selection": {"presentation": identifier}})
-        lifecycle.apply_patch(self.project, {"template_selection": {"qualitative": identifier}})
+            apply_current(self.project, {"template_selection": {"presentation": identifier}})
+        apply_current(self.project, {"template_selection": {"qualitative": identifier}})
         self.assertEqual(refs.selection(self.project)["qualitative"], identifier)
 
     def test_failed_analysis_keeps_original_and_is_not_complete(self):
@@ -109,11 +110,11 @@ class ReferenceTemplateTests(unittest.TestCase):
         record = refs.scan(self.project)["imported"][0]
         profile = self.profile(record["id"])
         with self.assertRaises(ValueError):
-            lifecycle.apply_patch(self.project, {"template_profiles": [{**profile, "visual_refs": []}]})
+            apply_current(self.project, {"template_profiles": [{**profile, "visual_refs": []}]})
         (self.project / "qa/fake.png").write_bytes(b"not a rendered image")
         with self.assertRaises(ValueError):
-            lifecycle.apply_patch(self.project, {"template_profiles": [{**profile, "visual_refs": ["qa/fake.png"]}]})
-        lifecycle.apply_patch(self.project, {"template_profiles": [profile]})
+            apply_current(self.project, {"template_profiles": [{**profile, "visual_refs": ["qa/fake.png"]}]})
+        apply_current(self.project, {"template_profiles": [profile]})
         self.assertEqual(path.read_bytes(), (self.project / record["path"]).read_bytes())
 
     def test_working_copy_never_overwrites_or_mislabels_as_final(self):
@@ -130,7 +131,7 @@ class ReferenceTemplateTests(unittest.TestCase):
         profile = complete_package(self.project)
         self.source()
         record = refs.scan(self.project)["imported"][0]
-        lifecycle.apply_patch(self.project, {"template_profiles": [self.profile(record["id"])]})
+        apply_current(self.project, {"template_profiles": [self.profile(record["id"])]})
         (self.project / "qa/output.png").write_bytes(PNG)
         (self.project / "qa/comparison.md").write_text("가상 비교 검수: 색·서체·표·문체·이전 자료 교체 확인", encoding="utf-8")
         check = {"kind": "qualitative", "output_ref": profile["qualitative_file"], "review_ref": "qa/comparison.md",
@@ -140,13 +141,13 @@ class ReferenceTemplateTests(unittest.TestCase):
     def test_output_comparison_is_bound_to_selected_source_profile_and_output(self):
         profile, record, check = self.ready()
         self.assertTrue(refs.check(self.project, profile))
-        lifecycle.apply_patch(self.project, {"template_checks": [check]})
+        apply_current(self.project, {"template_checks": [check]})
         self.assertEqual(refs.check(self.project, profile), [])
         with ZipFile(self.project / profile["qualitative_file"], "a") as archive:
             archive.writestr("docProps/custom.xml", "<changed/>")
         self.assertTrue(any("변경" in issue for issue in refs.check(self.project, profile)))
-        lifecycle.apply_patch(self.project, {"template_checks": [check]})
-        lifecycle.apply_patch(self.project, {"template_profiles": [{"template_id": record["id"], "style_notes": "새 분석"}]})
+        apply_current(self.project, {"template_checks": [check]})
+        apply_current(self.project, {"template_profiles": [{"template_id": record["id"], "style_notes": "새 분석"}]})
         self.assertTrue(any("변경" in issue for issue in refs.check(self.project, profile)))
 
     def test_reference_changes_invalidate_proposal_approval(self):
@@ -157,7 +158,7 @@ class ReferenceTemplateTests(unittest.TestCase):
         deliveries = starter.read_table(self.project, "deliverables")
         for row in deliveries:
             (self.project / row["path"]).write_text("가상 산출물", encoding="utf-8")
-        lifecycle.apply_patch(self.project, {"requirements": [{"source": "가상 원문", "description": "가상 요구", "priority": "must", "acceptance_criteria": "가상 기준"}],
+        apply_current(self.project, {"requirements": [{"source": "가상 원문", "description": "가상 요구", "priority": "must", "acceptance_criteria": "가상 기준"}],
             "deliverables": [{"deliverable_id": row["deliverable_id"], "owner": "가상 담당자"} for row in deliveries],
             "template_checks": [check]})
         (self.project / "review.md").write_text("가상 검토 근거", encoding="utf-8")
@@ -188,7 +189,7 @@ class ReferenceTemplateTests(unittest.TestCase):
         (self.project / refs.MANIFEST).write_text(json.dumps(catalog), encoding="utf-8")
         original = (self.project / "project.json").read_bytes()
         with self.assertRaises(ValueError):
-            lifecycle.apply_patch(self.project, {"template_profiles": [{"template_id": result["imported"][0]["id"]}]})
+            apply_current(self.project, {"template_profiles": [{"template_id": result["imported"][0]["id"]}]})
         self.assertEqual((self.project / "project.json").read_bytes(), original)
 
 
@@ -209,7 +210,7 @@ class ReferenceTemplateTests(unittest.TestCase):
         self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "register_and_analyze")
         record = refs.scan(self.project)["imported"][0]
         self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "analyze_reference")
-        lifecycle.apply_patch(self.project, {"template_profiles": [self.profile(record["id"])]})
+        apply_current(self.project, {"template_profiles": [self.profile(record["id"])]})
         self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "generate_and_compare")
         (self.project / "qa/reference.png").write_bytes(PNG + b"changed")
         self.assertEqual(refs.onboard(self.project)["roles"]["qualitative"]["agent_next_action"], "analyze_reference")

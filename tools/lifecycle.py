@@ -7,16 +7,20 @@ from pathlib import Path
 import re
 import sys
 import uuid
+import base64
 
 from tools import starter as core
 from tools import proposal
 from tools import reference_templates
+from tools import workflow
+from tools import features
 from tools.intake import hash_file, make_record
-from tools.storage import commit, confined, digest, json_bytes, lock, recover
+from tools.storage import commit, confined, digest, json_bytes, lock, recover, consistent_read
 
 IDS = {"requirements": ("requirement_id", "REQ"), "deliverables": ("deliverable_id", "DEL"),
        "tasks": ("task_id", "TASK"), "risks": ("risk_id", "RISK"), "reviews": ("review_id", "REV")}
 COMMANDS = {"apply", "review", "advance", "rewind", "ingest", "discover", "inspect", "doctor", "recover", "proposal-setup", "template-scan", "template-setup", "template-prepare", "template-onboard"}
+COMMANDS |= features.COMMANDS
 
 
 class GateError(ValueError):
@@ -25,6 +29,7 @@ class GateError(ValueError):
         super().__init__("단계 완료 기준 미충족: " + "; ".join(issues))
 
 
+@consistent_read
 def bundle(folder):
     root, data = core.load_project(folder)
     return root, data, {name: core.read_table(root, name) for name in core.HEADERS}
@@ -45,6 +50,7 @@ def table_bytes(root, name, rows):
     return output.getvalue().encode("utf-8")
 
 
+@consistent_read
 def events(root):
     path = confined(root, "state/events.jsonl")
     result = []
@@ -63,6 +69,16 @@ def add_event(root, changes, action, actor, details):
     log = events(root)
     revision = uuid.uuid4().hex
     log.append({"revision": revision, "at": core.now(), "action": action, "actor": actor, "details": details})
+    entries = []
+    for relative, content in changes.items():
+        if relative == "state/events.jsonl" or relative.startswith(("state/history/", "state/checkpoints/")):
+            continue
+        path = confined(root, relative)
+        before = path.read_bytes() if path.is_file() else None
+        entries.append({"path": relative, "before": base64.b64encode(before).decode() if before is not None else None,
+                        "after": digest(content) if content is not None else None})
+    changes[f"state/history/{revision}.json"] = json_bytes({"schema_version": 1, "revision": revision,
+        "action": action, "actor": actor, "entries": entries})
     changes["state/events.jsonl"] = ("\n".join(json.dumps(item, ensure_ascii=False) for item in log) + "\n").encode("utf-8")
     return revision
 
@@ -116,23 +132,32 @@ def apply_patch(folder, payload, actor="agent"):
         root, data, tables = bundle(root)
         history = events(root)
         actual = history[-1]["revision"] if history else None
-        if "expected_revision" in payload and payload["expected_revision"] != actual:
+        if "expected_revision" not in payload or payload["expected_revision"] != actual:
             raise ValueError("진행 기록이 변경되었습니다. inspect 후 변경안을 다시 작성하세요.")
         changes, assigned = {}, {}
         if "project" in payload:
             patch = payload["project"]
-            allowed = {"name", "objective", "scope_baseline", "client_or_product_owner", "project_manager", "technical", "tailoring", "methodology"}
+            allowed = {"name", "objective", "scope_baseline", "client_or_product_owner", "project_manager", "technical", "tailoring", "methodology", "workflow"}
             if not isinstance(patch, dict) or set(patch) - allowed:
                 raise ValueError("프로젝트의 단계·ID·스키마는 직접 바꿀 수 없습니다.")
             for key, value in patch.items():
                 if key == "technical":
-                    if not isinstance(value, dict) or set(value) - {"stack", "repository", "test_commands", "deployment_target"}:
+                    if not isinstance(value, dict) or set(value) - {"stack", "repository", "test_commands", "deployment_target", "source_roots"}:
                         raise ValueError("technical 구조가 잘못되었습니다.")
-                    if any(not isinstance(item, str) for field, item in value.items() if field != "test_commands"):
+                    if any(not isinstance(item, str) for field, item in value.items() if field not in {"test_commands", "source_roots"}):
                         raise ValueError("technical 값은 문자열이어야 합니다.")
                     if "test_commands" in value and (not isinstance(value["test_commands"], list) or any(not isinstance(command, str) for command in value["test_commands"])):
                         raise ValueError("test_commands는 문자열 목록이어야 합니다.")
+                    if "source_roots" in value:
+                        if not isinstance(value["source_roots"], list) or not value["source_roots"]:
+                            raise ValueError("source_roots는 코드 경로 목록이어야 합니다.")
+                        for relative in value["source_roots"]:
+                            confined(root, relative)
+                            if relative in {".", "project.json"} or Path(relative).parts[0] in {"state", "registers", "docs", "inputs", "templates"}:
+                                raise ValueError("source_roots에는 관리 기록 경로를 넣지 않습니다.")
                     data[key] = {**data.get(key, {}), **value}
+                elif key == "workflow":
+                    data[key] = value
                 elif key == "tailoring":
                     if not isinstance(value, list):
                         raise ValueError("tailoring은 목록이어야 합니다.")
@@ -173,6 +198,8 @@ def apply_patch(folder, payload, actor="agent"):
                 assigned[name].append(identifier)
             changes[f"registers/{name}.csv"] = table_bytes(root, name, rows)
         validate_tables(root, tables)
+        if "workflow" in data:
+            workflow.validate(data["workflow"], data, tables)
         if any(key in payload for key in ("template_selection", "template_profiles", "template_checks")):
             changes.update(reference_templates.patch_changes(root, payload))
         if "proposal" in payload:
@@ -235,11 +262,12 @@ def setup_proposal(folder, actor="agent"):
                 "required_deliverables": core.required_deliverables(data, "proposal")}
 
 
+@consistent_read
 def fingerprint(root, stage, evidence, *, tables=None):
     _, data, actual_tables = bundle(root)
     tables = tables if tables is not None else actual_tables
     order = list(core.STAGES).index(stage)
-    required = set(core.required_deliverables(data, stage))
+    required = set(core.required_deliverables(data, stage, tables["deliverables"]))
     documents = [row for row in tables["deliverables"] if row["deliverable_id"] in required]
     files = {evidence}
     fields = ["requirement_id", "source", "description", "acceptance_criteria", "priority", "exclusion_reason"]
@@ -248,6 +276,8 @@ def fingerprint(root, stage, evidence, *, tables=None):
             fields.append(field)
     requirements = []
     for row in tables["requirements"]:
+        if not workflow.selected(data, row, stage):
+            continue
         item = {field: row[field] for field in fields}
         item["deferred"] = row["status"] == "deferred"
         requirements.append(item)
@@ -262,17 +292,32 @@ def fingerprint(root, stage, evidence, *, tables=None):
     if not isinstance(inputs, dict) or not isinstance(inputs.get("inputs"), list):
         raise ValueError("입력 자료 목록이 잘못되었습니다.")
     for item in inputs["inputs"]:
+        if item.get("purpose") == "operating_note":
+            continue
         files.add(item["path"])
         if item.get("extraction", {}).get("path"):
             files.add(item["extraction"]["path"])
+        if item.get("extraction", {}).get("review_ref"):
+            files.add(item["extraction"]["review_ref"])
     if stage == "proposal" and proposal.enabled(data):
         profile = proposal.read(root)
         proposal.validate(profile)
         files.add(proposal.PROFILE)
         files.update(proposal.files(profile))
         files.update(reference_templates.review_files(root, profile))
+        from tools import artifacts
+        files.update(artifacts.files(root))
     hashes = {ref: hash_file(core.local_file(root, ref)) for ref in sorted(files)}
     scope = {key: data.get(key) for key in ("business_type", "methodology", "objective", "scope_baseline")}
+    scope["workflow_profile"] = data.get("workflow", {}).get("profile", "legacy")
+    if order >= 3:
+        scope["release"] = data.get("workflow", {}).get("release")
+    scope["blockers"] = data.get("workflow", {}).get("blockers", {}).get(stage, {})
+    if order >= 3:
+        scope["technical"] = data.get("technical", {})
+    if order >= 6:
+        from tools.evidence import source_hashes
+        hashes.update(source_hashes(root, data))
     body = {"stage": stage, "scope": scope, "requirements": sorted(requirements, key=lambda item: item["requirement_id"]),
             "documents": sorted(documents, key=lambda item: item["deliverable_id"]), "files": hashes}
     return digest(json.dumps(body, ensure_ascii=False, sort_keys=True).encode()), hashes
@@ -295,6 +340,7 @@ def latest_review(rows, stage):
     return next(row for row in matches if datetime.fromisoformat(row["reviewed_at"]) == latest)
 
 
+@consistent_read
 def stale_reviews(folder, stage, *, strict=False):
     root, _, tables = bundle(folder)
     review = latest_review(tables["reviews"], stage)
@@ -320,12 +366,13 @@ def record_review(folder, reviewer, evidence, notes, *, decision="approved", sta
     with lock(root):
         root, data, tables = bundle(root)
         stage = stage or data["current_stage"]
-        if stage not in core.STAGES or list(core.STAGES).index(stage) > list(core.STAGES).index(data["current_stage"]):
+        active_stages = workflow.stages(data)
+        if stage not in active_stages or active_stages.index(stage) > active_stages.index(data["current_stage"]):
             raise ValueError("현재 또는 이전 단계만 검토할 수 있습니다.")
         evidence_path = core.local_file(root, evidence)
         if evidence_path.suffix.lower() in {".md", ".txt"} and (not evidence_path.read_text(encoding="utf-8-sig").strip() or re.search(r"\bTODO\b", evidence_path.read_text(encoding="utf-8-sig"))):
             raise ValueError("검토 근거가 비어 있거나 미작성 상태입니다.")
-        required = set(core.required_deliverables(data, stage))
+        required = set(core.required_deliverables(data, stage, tables["deliverables"]))
         for row in tables["deliverables"]:
             if row["deliverable_id"] in required and row["status"] != "not_applicable":
                 row["status"] = "approved" if decision == "approved" else "in_review"
@@ -353,7 +400,7 @@ def transition(folder, *, target=None, actor="agent", reason="", evidence=None, 
     root, _ = core.load_project(folder)
     with lock(root):
         root, data, _ = bundle(root)
-        stages = list(core.STAGES)
+        stages = workflow.stages(data)
         previous = data["current_stage"]
         index = stages.index(previous)
         if backwards:
@@ -378,7 +425,7 @@ def transition(folder, *, target=None, actor="agent", reason="", evidence=None, 
         if backwards:
             tables = {name: core.read_table(root, name) for name in core.HEADERS}
             for row in tables["deliverables"]:
-                if stages.index(row["stage"]) >= stages.index(target) and row["status"] == "approved":
+                if row["stage"] in stages and stages.index(row["stage"]) >= stages.index(target) and row["status"] == "approved":
                     row["status"] = "in_review"
             changes["registers/deliverables.csv"] = table_bytes(root, "deliverables", tables["deliverables"])
         handoff = core.local_file(root, "HANDOFF.md").read_text(encoding="utf-8-sig")
@@ -389,9 +436,11 @@ def transition(folder, *, target=None, actor="agent", reason="", evidence=None, 
         return {"from": previous, "to": target, "revision": revision}
 
 
-def ingest(folder, source, actor="agent"):
+def ingest(folder, source, actor="agent", purpose="baseline"):
     root, _ = core.load_project(folder)
     source = Path(source).resolve()
+    if purpose not in {"baseline", "operating_note"}:
+        raise ValueError("입력 purpose는 baseline 또는 operating_note여야 합니다.")
     if not source.is_file():
         raise ValueError("입력 원본 파일이 없습니다.")
     with lock(root):
@@ -402,6 +451,8 @@ def ingest(folder, source, actor="agent"):
         checksum = hash_file(source)
         existing = next((item for item in data["inputs"] if item["sha256"] == checksum), None)
         if existing and core.local_file(root, existing["path"]).is_file():
+            if existing.get("purpose", "baseline") != purpose:
+                raise ValueError("기존 자료의 업무 용도를 자동 변경하지 않습니다.")
             if hash_file(root / existing["path"]) != checksum:
                 raise ValueError("이미 등록된 원본이 변경되었습니다. 원본을 확인하세요.")
             return {"input": existing, "unchanged": True}
@@ -409,6 +460,7 @@ def ingest(folder, source, actor="agent"):
         relative = f"inputs/sources/{identifier}/{source.name}"
         confined(root, relative)
         record, extracted = make_record(source, identifier, relative, core.now())
+        record["purpose"] = purpose
         content = source.read_bytes()
         if digest(content) != record["sha256"]:
             raise ValueError("등록 중 원본이 변경되었습니다. 다시 읽으세요.")
@@ -439,6 +491,7 @@ def discover(workspace):
     return result
 
 
+@consistent_read
 def inspect_project(folder):
     root, data, tables = bundle(folder)
     _, stage, issues = core.check_project(root)
@@ -448,10 +501,13 @@ def inspect_project(folder):
     inputs = json.loads(manifest.read_text(encoding="utf-8"))["inputs"] if manifest.exists() else []
     history = events(root)
     prior = []
-    for item in list(core.STAGES)[:list(core.STAGES).index(stage) + 1]:
+    active_stages = workflow.stages(data)
+    for item in active_stages[:active_stages.index(stage) + 1]:
         prior.extend(stale_reviews(root, item, strict=True))
     return {"project": data, "path": str(root), "revision": history[-1]["revision"] if history else None,
-            "stage": stage, "deliverables": [row for row in tables["deliverables"] if row["deliverable_id"] in core.required_deliverables(data, stage)],
+            "stage": stage, "deliverables": [row for row in tables["deliverables"] if row["deliverable_id"] in core.required_deliverables(data, stage, tables["deliverables"])],
+            "workflow": {"profile": data.get("workflow", {}).get("profile", "legacy"), "stages": active_stages,
+                         "release": data.get("workflow", {}).get("release")},
             "proposal_package": {"enabled": proposal.enabled(data), "profile": proposal.PROFILE if proposal.enabled(data) else None},
             "reference_templates": reference_templates.overview(root),
             "open_tasks": [row for row in tables["tasks"] if row["status"] != "done"], "inputs": inputs,
@@ -469,9 +525,29 @@ def doctor(folder=None):
               "manifest_version_matches": len({item["version"] for item in manifests}) == 1,
               "template_present": (core.BLUEPRINT / "project.json").is_file(),
               "skill_present": (core.ROOT / "skills/project-lifecycle/SKILL.md").is_file()}
+    blueprint_version = json.loads((core.BLUEPRINT / "project.json").read_text(encoding="utf-8")).get("starter_version")
+    checks["blueprint_version_matches"] = blueprint_version == manifests[0]["version"]
+    inventory = json.loads((core.ROOT / "tools/package-files.json").read_text(encoding="utf-8"))
+    checks["runtime_files_present"] = all((core.ROOT / name).is_file() for name in inventory)
+    package_manifest = core.ROOT / "PACKAGE.json"
+    if package_manifest.is_file():
+        package = json.loads(package_manifest.read_text(encoding="utf-8"))
+        hashes = package.get("sha256", {})
+        checks["package_integrity"] = (package.get("name") == manifests[0]["name"] and package.get("version") == manifests[0]["version"]
+            and set(hashes) == set(inventory) and all(digest(confined(core.ROOT, name).read_bytes()) == value for name, value in hashes.items()))
     result = {"ready": all(checks.values()), "checks": checks, "version": manifests[0]["version"], "python": sys.version.split()[0]}
+    result["plugin_root"] = str(core.ROOT.resolve())
+    result["distribution"] = "verified_package" if package_manifest.is_file() else "source_checkout"
+    import importlib.util
+    result["ready_scope"] = "management_engine"
+    result["capabilities"] = {"pdf.read": {"status": "available" if importlib.util.find_spec("pypdf") else "unavailable"}}
+    for name in ("docx.create", "pptx.create", "pdf.render", "ocr", "korean_fonts"):
+        result["capabilities"][name] = {"status": "unknown", "reason": "호스트 세션의 실제 제작 도구로 확인해야 합니다."}
     if folder:
-        root, _ = core.load_project(folder)
+        root, project = core.load_project(folder)
+        result["project_path"] = str(root)
+        result["project_starter_version"] = project.get("starter_version")
+        result["upgrade_required"] = project.get("starter_version") != result["version"]
         result["pending_transaction"] = (root / "state/pending.json").exists()
         result["write_locked"] = (root / "state/write.lock").exists()
         result["ready"] = result["ready"] and not result["pending_transaction"] and not result["write_locked"]
@@ -480,6 +556,9 @@ def doctor(folder=None):
 
 def add_parsers(commands):
     for name in COMMANDS:
+        if name in features.COMMANDS:
+            features.add_parser(commands, name)
+            continue
         if name == "template-onboard":
             parser = commands.add_parser(name, help="사용자 프로젝트의 참고 폴더·환경·다음 에이전트 작업 준비")
             parser.add_argument("project")
@@ -497,6 +576,7 @@ def add_parsers(commands):
             parser.add_argument("--file", type=Path, required=True)
         if name == "ingest":
             parser.add_argument("source", type=Path)
+            parser.add_argument("--purpose", choices=("baseline", "operating_note"), default="baseline")
         if name == "template-scan":
             parser.add_argument("--source", type=Path, help="qualitative/presentation 폴더를 가진 회사 참고자료 폴더")
         if name == "template-prepare":
@@ -521,6 +601,8 @@ def add_parsers(commands):
 
 
 def run_args(args):
+    if args.command in features.COMMANDS:
+        return features.run(args)
     if args.command == "template-onboard":
         return reference_templates.onboard(args.project, args.actor)
     if args.command == "template-scan":
@@ -534,7 +616,7 @@ def run_args(args):
     if args.command == "apply":
         return apply_patch(args.project, json.loads(args.file.read_text(encoding="utf-8-sig")), args.actor)
     if args.command == "ingest":
-        return ingest(args.project, args.source, args.actor)
+        return ingest(args.project, args.source, args.actor, args.purpose)
     if args.command == "review":
         return record_review(args.project, args.reviewer, args.evidence, args.notes, decision=args.decision, stage=args.stage)
     if args.command in {"advance", "rewind"}:

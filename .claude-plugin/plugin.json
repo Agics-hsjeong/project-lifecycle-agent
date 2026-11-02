@@ -1,7 +1,9 @@
 {
   "name": "project-lifecycle-agent",
-  "version": "0.5.1",
+  "version": "2.0.0-beta.1",
   "license": "MIT",
-  "author": {"name": "Agics-hsjeong"},
+  "author": {
+    "name": "Agics-hsjeong"
+  },
   "description": "RFP와 사업 아이디어에서 제안·설계·개발·납품·유지보수까지 프로젝트 프로세스를 관리합니다."
 }

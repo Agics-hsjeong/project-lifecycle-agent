@@ -1,3 +1,4 @@
+from revision_fixtures import apply_current
 """Synthetic project scenarios; these approvals are never customer approvals."""
 import base64
 import contextlib
@@ -42,7 +43,7 @@ class LifecycleTests(unittest.TestCase):
         self.write("src/example.py", "value = 1\n")
         self.write("tests/result.md", "가상 회귀 결과: 통과")
         complete_package(self.project)
-        return engine.apply_patch(self.project, {
+        return apply_current(self.project, {
             "project": {"project_manager": "가상 PM", "client_or_product_owner": "가상 담당자",
                         "objective": "신청 조회", "scope_baseline": "REQ-001"},
             "requirements": [{"source": "가상 입력 1절", "description": "신청 조회", "priority": "must",
@@ -62,13 +63,13 @@ class LifecycleTests(unittest.TestCase):
         task_file.write_text(",".join(fields) + "\n", encoding="utf-8")
         result = self.prepare()
         self.assertEqual(result["assigned"]["requirements"], ["REQ-001"])
-        update = engine.apply_patch(self.project, {"expected_revision": result["revision"],
+        update = apply_current(self.project, {"expected_revision": result["revision"],
             "tasks": [{"requirement_ids": "REQ-001", "next_action": "실제 분석", "team": "A"}]})
         self.assertEqual(update["assigned"]["tasks"], ["TASK-001"])
         self.assertEqual(starter.read_table(self.project, "tasks")[0]["team"], "A")
         self.assertEqual(task_file.read_text(encoding="utf-8").splitlines()[0], ",".join(fields))
         with self.assertRaisesRegex(ValueError, "변경되었습니다"):
-            engine.apply_patch(self.project, {"expected_revision": result["revision"], "handoff": "stale"})
+            apply_current(self.project, {"expected_revision": result["revision"], "handoff": "stale"})
 
     def test_invalid_change_is_rejected_without_partial_write(self):
         original = (self.project / "project.json").read_bytes()
@@ -78,7 +79,7 @@ class LifecycleTests(unittest.TestCase):
                         {"requirements": [{"deliverable_ids": "DEL-999"}]},
                         {"deliverables": [{"deliverable_id": "DEL-001", "path": "../private.txt"}]}):
             with self.subTest(payload=payload), self.assertRaises(ValueError):
-                engine.apply_patch(self.project, payload)
+                apply_current(self.project, payload)
             self.assertEqual((self.project / "project.json").read_bytes(), original)
         self.assertFalse((self.project / "state/events.jsonl").exists())
 
@@ -90,7 +91,7 @@ class LifecycleTests(unittest.TestCase):
             self.write(relative, "변경된 내용")
             self.assertTrue(engine.stale_reviews(self.project, "discovery", strict=True))
         self.approve()
-        engine.apply_patch(self.project, {"project": {"scope_baseline": "범위 변경"}})
+        apply_current(self.project, {"project": {"scope_baseline": "범위 변경"}})
         self.assertTrue(engine.stale_reviews(self.project, "discovery", strict=True))
         self.approve()
         source = self.parent / "additional.txt"
@@ -102,7 +103,7 @@ class LifecycleTests(unittest.TestCase):
     def test_status_progression_does_not_invalidate_scope_review(self):
         self.prepare()
         self.approve()
-        engine.apply_patch(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "implemented", "implementation_refs": "src/example.py"}]})
+        apply_current(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "implemented", "implementation_refs": "src/example.py"}]})
         self.assertEqual(engine.stale_reviews(self.project, "discovery", strict=True), [])
 
     def test_full_lifecycle_and_rewind(self):
@@ -110,13 +111,13 @@ class LifecycleTests(unittest.TestCase):
         stages = list(starter.STAGES)
         for stage in stages:
             if stage == "planning":
-                engine.apply_patch(self.project, {"requirements": [{"requirement_id": "REQ-001", "design_refs": "docs/design.md"}]})
+                apply_current(self.project, {"requirements": [{"requirement_id": "REQ-001", "design_refs": "docs/design.md"}]})
             if stage == "implementation":
-                engine.apply_patch(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "implemented", "implementation_refs": "src/example.py"}]})
+                apply_current(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "implemented", "implementation_refs": "src/example.py"}]})
             if stage == "verification":
-                engine.apply_patch(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "verified", "test_refs": "tests/result.md"}]})
+                apply_current(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "verified", "test_refs": "tests/result.md"}]})
             if stage == "handover":
-                engine.apply_patch(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "accepted", "deliverable_ids": "DEL-012"}]})
+                apply_current(self.project, {"requirements": [{"requirement_id": "REQ-001", "status": "accepted", "deliverable_ids": "DEL-012"}]})
             self.approve()
             self.assertEqual(starter.check_project(self.project)[2], [], stage)
             if stage != "maintenance":
@@ -209,7 +210,7 @@ class LifecycleTests(unittest.TestCase):
         self.write("docs/a.txt", "before")
         with storage.lock(self.project):
             with self.assertRaisesRegex(ValueError, "잠금"):
-                engine.apply_patch(self.project, {"handoff": "동시 변경"})
+                apply_current(self.project, {"handoff": "동시 변경"})
             original = storage.atomic_write
             def fail_once(path, value):
                 if Path(path).name == "fail.txt":
@@ -228,7 +229,7 @@ class LifecycleTests(unittest.TestCase):
     def test_crash_recovery_and_unrelated_edit_protection(self):
         self.pending()
         with self.assertRaisesRegex(ValueError, "미완료"):
-            engine.apply_patch(self.project, {"handoff": "blocked"})
+            apply_current(self.project, {"handoff": "blocked"})
         self.assertTrue(storage.recover(self.project)["recovered"])
         self.assertEqual((self.project / "docs/a.txt").read_bytes(), b"before")
         self.pending()

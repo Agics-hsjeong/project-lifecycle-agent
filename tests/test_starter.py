@@ -172,12 +172,13 @@ class StarterTests(unittest.TestCase):
         self.assertFalse((self.parent / "missing-source").exists())
 
     def test_cli_uses_workspace_instead_of_plugin_install_folder(self):
-        result = starter.main(["init", "--workspace", str(self.parent), "--name", "작업 공간 사업", "--slug", "workspace-project"])
+        with patch.object(starter, "ROOT", self.parent / "separate-plugin"):
+            result = starter.main(["init", "--workspace", str(self.parent), "--name", "작업 공간 사업", "--slug", "workspace-project"])
         self.assertEqual(result, 0)
         self.assertTrue((self.parent / "projects/workspace-project/project.json").is_file())
 
     def test_default_workspace_is_current_working_folder(self):
-        with patch.object(starter.Path, "cwd", return_value=self.parent):
+        with patch.object(starter.Path, "cwd", return_value=self.parent), patch.object(starter, "ROOT", self.parent / "separate-plugin"):
             result = starter.main(["init", "--name", "기본 작업 공간", "--slug", "default-workspace"])
         self.assertEqual(result, 0)
         self.assertTrue((self.parent / "projects/default-workspace/project.json").is_file())

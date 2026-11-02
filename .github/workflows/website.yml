@@ -5,11 +5,25 @@ on:
     branches: [main]
     paths:
       - 'website/**'
+      - 'plugin.json'
+      - '.codex-plugin/plugin.json'
+      - '.claude-plugin/plugin.json'
+      - 'blueprint/project.json'
+      - 'README.md'
+      - 'docs/V2-IMPLEMENTATION.md'
+      - 'tools/check_release.py'
       - 'examples/customer-portal/**'
       - '.github/workflows/website.yml'
   pull_request:
     paths:
       - 'website/**'
+      - 'plugin.json'
+      - '.codex-plugin/plugin.json'
+      - '.claude-plugin/plugin.json'
+      - 'blueprint/project.json'
+      - 'README.md'
+      - 'docs/V2-IMPLEMENTATION.md'
+      - 'tools/check_release.py'
       - 'examples/customer-portal/**'
       - '.github/workflows/website.yml'
   workflow_dispatch:
@@ -37,6 +51,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: python ../tools/check_release.py --site
       - run: npm ci
       - run: npm run build
       - run: npm run check:links
