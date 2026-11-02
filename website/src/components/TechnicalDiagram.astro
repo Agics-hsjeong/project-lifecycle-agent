@@ -1,0 +1,12 @@
+---
+import architecture from '../../public/diagrams/architecture.svg?raw';
+import architectureMobile from '../../public/diagrams/architecture-mobile.svg?raw';
+import target from '../../public/diagrams/target-system.svg?raw';
+import targetMobile from '../../public/diagrams/target-system-mobile.svg?raw';
+interface Props { kind: 'architecture' | 'target'; }
+const { kind } = Astro.props;
+const wide = kind === 'architecture' ? architecture : target;
+const compact = kind === 'architecture' ? architectureMobile : targetMobile;
+---
+<div class="diagram-wide" set:html={wide}></div>
+<div class="diagram-compact" set:html={compact}></div>

@@ -1,0 +1,200 @@
+/* Visual system: architectural plates, ink, jade and a warm paper surface. */
+:root { --paper: #fbfcf8; --soft: #eff3eb; }
+.visually-hidden { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+.container { max-width:1440px; padding-inline:56px; }
+.site-header { background:#fbfcf8f5; backdrop-filter:blur(14px); }
+.header-inner { height:82px; }
+.desktop-nav { gap:27px; }
+.brand { letter-spacing:-.055em; }
+.hero { grid-template-columns:.96fr 1.12fr; gap:72px; padding-block:80px 62px; }
+.hero h1 { font-size:clamp(46px,4.7vw,68px); letter-spacing:-.065em; line-height:1.2; margin-top:28px; }
+.hero h1 span { font-weight:430; }
+.hero-description { margin-top:28px; font-size:19px; }
+.hero-definition { font-size:12px; margin-top:18px; }
+.hero-actions { gap:24px; margin-top:34px; }
+.hero-actions .button { gap:22px; border-radius:5px; }
+.hero-actions .inline-link { font-size:13px; gap:14px; }
+.project-fabric { min-width:0; }
+.project-fabric picture { display:block; border:1px solid #2a4c3f; border-radius:12px; overflow:hidden; background:#102d29; box-shadow:0 22px 45px -25px #173e3859; }
+.project-fabric img { width:100%; height:auto; display:block; }
+.project-fabric figcaption { display:flex; align-items:center; gap:15px; margin-top:17px; color:var(--muted); font-size:11px; }
+.project-fabric figcaption>span:first-child { color:var(--accent); font-size:10px; }
+.project-fabric figcaption>span:last-child { margin-left:auto; font-size:10px; }
+.principle-strip { padding-block:25px; margin-bottom:70px; }
+.principle-strip>p { font-size:16px; }
+.architecture-section { color:#eef6ed; background:#102d29; padding-block:85px 67px; position:relative; }
+.architecture-section .section-intro { margin-bottom:40px; }
+.architecture-section .section-index { color:#bdd5c2; }
+.architecture-section .section-index>span { color:#8eae9b; }
+.architecture-section h2 { font-size:clamp(34px,3.2vw,46px); font-weight:500; }
+.architecture-intro { min-width:290px; }
+.architecture-intro>p { color:#c2d8c7; font-size:16px; line-height:1.8; }
+.architecture-intro .inline-link { color:#d4e7d8; font-size:13px; margin-top:20px; }
+.architecture-intro .inline-link:hover { color:white; }
+.technical-figure { overflow:hidden; border:1px solid #345b49; border-radius:10px; }
+.figure-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; border-bottom:1px solid #345b49; padding:19px 27px; font-size:11px; color:#c1d7c7; background:#16382f; }
+.figure-toolbar .mono { letter-spacing:.07em; }
+.figure-toolbar a { display:inline-flex; gap:16px; min-height:26px; align-items:center; }
+.figure-toolbar a:hover { color:white; }
+.diagram-wide>svg,.diagram-compact>svg { display:block; width:100%; height:auto; }
+.diagram-compact { display:none; }
+.technical-figure figcaption { display:flex; align-items:baseline; gap:22px; padding:20px 27px; border-top:1px solid #345b49; font-size:12px; line-height:1.8; }
+.technical-figure figcaption>.mono { flex-shrink:0; font-size:10px; letter-spacing:.03em; }
+.architecture-figure figcaption { color:#bcd4c4; background:#16382f; }
+.engineering-notes { list-style:none; margin:0; padding:35px 0 0; display:grid; grid-template-columns:repeat(3,1fr); gap:40px; }
+.engineering-notes li+li { padding-left:35px; border-left:1px solid #345b49; }
+.engineering-notes .mono { font-size:10px; color:#a4c7b0; letter-spacing:.08em; }
+.engineering-notes h3 { font-size:18px; font-weight:500; margin-top:13px; letter-spacing:-.03em; }
+.engineering-notes p { font-size:13px; color:#bcd2c3; line-height:1.85; margin-top:10px; max-width:320px; }
+.workflow-section { padding-block:92px 85px; }
+.profile-tabs button { font-size:17px; }
+.profile-tabs button[aria-selected='true'] { color:var(--accent-dark); }
+.profile-panel { padding-block:36px; }
+.phase-title>span { width:24px; height:24px; display:inline-grid; place-items:center; border:1px solid #bfcfc4; background:#f0f5ec; border-radius:50%; font-size:10px; flex-shrink:0; }
+.phase-title { align-items:center; gap:11px; }
+.phase-list>li { padding-block:24px; }
+.handoff-note { background:#eef3e9; border:1px solid #dbe5d7; border-radius:6px; }
+.target-section { padding-block:85px 78px; background:#eef3e9; border-block:1px solid #dce5d7; }
+.target-section .section-intro { margin-bottom:43px; }
+.target-case-heading { display:flex; justify-content:space-between; align-items:flex-end; gap:20px; padding-bottom:25px; border-bottom:1px solid #c9d7c5; }
+.case-label { font-size:11px; color:#526b5a; border:1px solid #bacdb4; background:#f6f9f2; padding:6px 9px; border-radius:3px; display:inline-block; }
+.target-case-heading h3 { font-size:26px; font-weight:550; margin-top:14px; letter-spacing:-.045em; }
+.target-case-heading>.inline-link { font-size:13px; }
+.system-lens { display:flex; align-items:center; gap:9px; padding-block:24px; flex-wrap:wrap; }
+.lens-label { font-size:12px; color:#536d5c; margin-right:12px; }
+.system-lens button { border:1px solid transparent; background:transparent; border-radius:4px; padding:9px 16px; font-size:13px; min-height:40px; }
+.system-lens button:hover { border-color:#adc5aa; }
+.system-lens button[aria-pressed='true'] { color:#fbfdf9; border-color:#244d40; background:#244d40; }
+.target-figure { border-color:#c1d1bb; background:#f3f7f0; }
+.target-figure figcaption { border-top-color:#cbd9c4; background:#f7faf3; color:#46614e; }
+.target-figure figcaption>.mono { color:var(--accent-dark); }
+.target-figure figcaption>p { flex:1; }
+.target-figure figcaption>a { color:var(--accent-dark); font-size:11px; flex-shrink:0; white-space:nowrap; }
+.node-box { transition:fill .18s,stroke .18s; }
+.target-figure[data-view='access'] .system-access .node-box,.target-figure[data-view='data'] .system-data .node-box { stroke:#08766d; stroke-width:2.5; fill:#d9efdf; }
+.requirement-thread { margin-top:26px; padding:25px 28px; background:#fbfdf8; border:1px solid #ccd9c5; border-left:3px solid #2f7762; border-radius:4px; display:grid; grid-template-columns:1fr 1.35fr; gap:30px; align-items:center; }
+.thread-origin>.mono { color:#276451; font-size:10px; }
+.thread-origin p { margin-top:10px; font-size:15px; font-weight:550; line-height:1.6; }
+.requirement-thread ol { display:grid; grid-template-columns:repeat(3,1fr); list-style:none; padding:0; margin:0; gap:20px; }
+.requirement-thread li { display:flex; flex-direction:column; gap:10px; position:relative; padding-top:12px; border-top:1px solid #b6cbb8; }
+.requirement-thread li::before { position:absolute; content:''; width:5px; height:5px; background:#43846b; top:-3px; left:0; border-radius:50%; }
+.requirement-thread li>span { color:var(--muted); font-size:11px; }
+.requirement-thread li>strong { font-size:13px; font-weight:550; line-height:1.6; }
+.system-disclaimer { font-size:11px; color:#586e5e; line-height:1.8; margin-top:17px; }
+.template-section { background:var(--paper); padding-block:90px; border-bottom:1px solid var(--line); }
+.template-reference { border-radius:8px; background:#f2f5ed; box-shadow:0 12px 24px -20px #223e344d; }
+.file-type { background:#fbfdf7; }
+.template-steps span { color:#4f6d59; }
+.install-panel { border-radius:8px; overflow:hidden; }
+.resources-section { padding-top:8px; }
+@media(min-width:1600px) { .hero { padding-block:95px 72px; } }
+@media(max-width:1200px) {
+  .container { padding-inline:36px; }
+  .hero { gap:38px; grid-template-columns:1fr 1.05fr; padding-block:60px; }
+  .hero h1 { font-size:52px; }
+  .hero-description { font-size:17px; }
+  .hero-actions { gap:19px; }
+  .hero-actions .button { padding-inline:16px; font-size:14px; }
+  .hero-actions .inline-link { font-size:12px; }
+  .desktop-nav { gap:20px; font-size:13px; }
+  .header-inner { gap:23px; }
+  .architecture-intro { min-width:250px; }
+  .engineering-notes { gap:28px; }
+  .engineering-notes li+li { padding-left:26px; }
+  .requirement-thread { grid-template-columns:.95fr 1.3fr; gap:24px; }
+}
+@media(max-width:950px) and (min-width:801px) {
+  .container { padding-inline:30px; }
+  .brand { font-size:19px; }
+  .header-inner { gap:17px; }
+  .desktop-nav { gap:14px; font-size:12px; }
+  .hero h1 { font-size:43px; }
+  .hero-description { font-size:16px; }
+  .hero-actions { align-items:flex-start; flex-direction:column; gap:20px; }
+}
+@media(max-width:800px) {
+  .container { padding-inline:24px; }
+  .header-inner { height:70px; }
+  .hero { grid-template-columns:1fr; gap:37px; padding-block:43px 35px; }
+  .hero-copy { max-width:600px; }
+  .hero h1 { font-size:clamp(35px,7.9vw,56px); margin-top:24px; }
+  .hero-description { font-size:17px; margin-top:23px; }
+  .hero-actions { margin-top:27px; gap:23px; }
+  .hero-actions .inline-link { font-size:13px; }
+  .hero-definition { font-size:12px; }
+  .project-fabric { width:100%; max-width:600px; justify-self:center; }
+  .project-fabric figcaption { font-size:10px; gap:12px; margin-top:13px; }
+  .principle-strip { margin-bottom:44px; padding-block:23px; }
+  .principle-strip>p { font-size:15px; }
+  .architecture-section { padding-block:55px 45px; }
+  .architecture-section h2 { font-size:34px; }
+  .architecture-intro { margin-top:22px; }
+  .architecture-intro>p { font-size:14px; }
+  .architecture-intro .inline-link { margin-top:14px; font-size:13px; }
+  .architecture-section .section-intro { margin-bottom:27px; }
+  .figure-toolbar { padding:15px 18px; font-size:10px; gap:16px; }
+  .figure-toolbar .mono { font-size:9px; letter-spacing:0; }
+  .figure-toolbar a { gap:8px; white-space:nowrap; }
+  .technical-figure { border-radius:7px; }
+  .technical-figure figcaption { padding:16px 18px; font-size:11px; gap:14px; align-items:flex-start; }
+  .technical-figure figcaption>.mono { font-size:9px; padding-top:2px; }
+  .engineering-notes { grid-template-columns:1fr; gap:22px; padding-top:29px; }
+  .engineering-notes li+li { padding:22px 0 0; border-left:0; border-top:1px solid #345b49; }
+  .engineering-notes h3 { font-size:17px; margin-top:10px; }
+  .engineering-notes p { max-width:none; font-size:13px; margin-top:8px; }
+  .workflow-section { padding-block:61px; }
+  .profile-tabs button { font-size:14px; }
+  .profile-panel { padding-block:28px; }
+  .phase-title>span { width:21px; height:21px; font-size:9px; }
+  .phase-title { gap:8px; align-items:flex-start; }
+  .phase-list>li { grid-template-columns:116px 1fr; }
+  .phase-title h4 { padding-top:1px; }
+  .handoff-note { padding:19px; }
+  .target-section { padding-block:58px 45px; }
+  .target-section .section-intro { margin-bottom:30px; }
+  .target-case-heading { display:block; padding-bottom:22px; }
+  .target-case-heading h3 { font-size:23px; margin-top:14px; }
+  .target-case-heading>.inline-link { margin-top:16px; font-size:13px; }
+  .case-label { font-size:10px; }
+  .system-lens { gap:6px; padding-block:18px; }
+  .lens-label { width:100%; font-size:10px; margin:0 0 3px; }
+  .system-lens button { font-size:12px; padding:9px 13px; }
+  .target-figure figcaption { flex-wrap:wrap; }
+  .target-figure figcaption>p { flex-basis:calc(100% - 60px); }
+  .target-figure figcaption>a { margin-left:53px; }
+  .requirement-thread { grid-template-columns:1fr; gap:23px; padding:22px; margin-top:20px; }
+  .thread-origin p { font-size:14px; }
+  .requirement-thread ol { gap:15px; }
+  .requirement-thread li>strong { font-size:12px; }
+  .system-disclaimer { font-size:10px; }
+  .template-section { padding-block:60px; }
+  .template-reference { padding:23px; }
+  .resources-section { padding-top:0; }
+}
+@media(max-width:640px) {
+  .diagram-wide { display:none; }
+  .diagram-compact { display:block; }
+}
+@media(max-width:370px) {
+  .container { padding-inline:20px; }
+  .hero h1 { font-size:33px; }
+  .hero-actions { gap:18px; }
+  .hero-actions .button { padding-inline:13px; font-size:13px; }
+  .hero-actions .inline-link { font-size:12px; }
+  .hero-definition { font-size:11px; }
+  .figure-toolbar { padding-inline:13px; font-size:9px; }
+  .figure-toolbar .mono { max-width:140px; font-size:8px; line-height:1.7; }
+  .profile-tabs button { font-size:13px; }
+  .phase-list>li { grid-template-columns:104px 1fr; gap:10px; }
+  .requirement-thread { padding:19px 16px; }
+  .requirement-thread ol { gap:10px; }
+  .requirement-thread li>strong { font-size:11px; }
+}
+@media(prefers-reduced-motion:reduce) {
+  .node-box { transition:none; }
+}
+@media(min-width:641px) and (max-width:1000px) {
+  .diagram-wide { display:none; }
+  .diagram-compact { display:block; }
+  .diagram-compact>svg { max-width:460px; margin-inline:auto; }
+}

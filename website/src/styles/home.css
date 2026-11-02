@@ -58,29 +58,6 @@ a:focus-visible, button:focus-visible, summary:focus-visible, pre:focus-visible 
 .hero-definition { color: var(--muted); font-size: 13px; margin-top: 17px; line-height: 1.8; }
 .hero-actions { display: flex; align-items: center; gap: 27px; margin-top: 32px; flex-wrap: wrap; }
 .hero-actions .inline-link { font-size: 14px; }
-.project-example { min-width: 0; }
-.document-sheet { position: relative; padding: 24px 30px 0; background: #fff; border: 1px solid #cfd9d1; box-shadow: 9px 9px 0 #eaf0e9; }
-.sheet-masthead { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 600; letter-spacing: .06em; color: var(--muted); padding-bottom: 18px; border-bottom: 1px solid var(--line); }
-.sheet-number { margin-left: auto; font-family: Consolas, monospace; font-size: 12px; font-weight: 400; }
-.document-glyph { width: 11px; height: 14px; border: 1px solid var(--accent); position: relative; }
-.document-glyph::after { content: ''; position: absolute; left: 2px; right: 2px; height: 1px; top: 4px; background: var(--accent); box-shadow: 0 3px 0 var(--accent); }
-.sheet-heading { margin-top: 21px; }
-.sheet-heading p { font-size: 16px; font-weight: 650; letter-spacing: -.03em; }
-.sheet-heading>span { display: block; font-size: 12px; margin-top: 7px; color: var(--muted); }
-.requirement-note { border-left: 2px solid var(--accent); padding: 0 0 0 20px; margin-block: 28px 27px; }
-.requirement-id { font-size: 11px; color: var(--accent); letter-spacing: .02em; }
-.requirement-note h2 { margin-top: 10px; font-size: 29px; font-weight: 550; line-height: 1.3; letter-spacing: -.045em; }
-.requirement-note p { color: var(--muted); font-size: 14px; line-height: 1.7; margin-top: 11px; }
-.trace-label { font-size: 11px; color: var(--muted); margin-bottom: 12px; }
-.trace-path { display: grid; grid-template-columns: repeat(3,1fr); list-style: none; margin: 0; padding: 0 0 21px; }
-.trace-path li { position: relative; display: flex; flex-direction: column; gap: 6px; border-top: 1px solid #a9bdb3; padding-top: 13px; }
-.trace-path li::before { content: ''; position: absolute; width: 4px; height: 4px; background: #7f9b8d; top: -3px; left: 0; }
-.trace-path li>span { font-family: Consolas, monospace; color: var(--muted); font-size: 10px; }
-.trace-path strong { font-size: 15px; font-weight: 550; }
-.trace-path small { font-size: 12px; color: var(--muted); }
-.sheet-foot { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding-block: 13px; border-top: 1px solid var(--line); font-size: 10px; color: var(--muted); }
-.project-example figcaption { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-top: 20px; font-size: 11px; line-height: 1.6; color: var(--muted); }
-.project-example figcaption a { color: var(--accent); white-space: nowrap; }
 .principle-strip { border-block: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; gap: 30px; padding-block: 27px; position: relative; }
 .principle-strip>p { font-size: 15px; font-weight: 550; letter-spacing: -.02em; }
 .principle-strip ul { list-style: none; padding: 0; margin: 0; display: flex; gap: 26px; color: var(--muted); font-size: 13px; }
@@ -203,7 +180,6 @@ h2 { font-size: clamp(30px, 3.2vw, 41px); line-height: 1.3; font-weight: 550; le
   .hero-actions { gap: 20px; }
   .hero-actions .button { font-size: 14px; padding-inline: 17px; gap: 15px; }
   .hero-actions .inline-link { font-size: 13px; }
-  .document-sheet { padding-inline: 24px; }
   .principle-strip ul { gap: 16px; font-size: 12px; }
   .principle-strip li+li { padding-left: 16px; }
   .profile-panel,.template-layout,.install-section,.faq-section { gap: 48px; }
@@ -237,10 +213,6 @@ h2 { font-size: clamp(30px, 3.2vw, 41px); line-height: 1.3; font-weight: 550; le
   .hero-actions { margin-top: 25px; gap: 24px; }
   .hero-actions .button { min-height: 50px; font-size: 14px; padding-inline: 16px; }
   .hero-actions .inline-link { font-size: 13px; gap: 12px; }
-  .project-example { max-width: 480px; width: 100%; justify-self: center; }
-  .document-sheet { padding: 22px 25px 0; box-shadow: 6px 6px 0 #eaf0e9; }
-  .requirement-note h2 { font-size: 28px; }
-  .project-example figcaption { margin-top: 17px; font-size: 10px; }
   .principle-strip { display: block; padding-block: 23px; }
   .principle-strip ul { flex-wrap: wrap; gap: 10px 14px; margin-top: 13px; font-size: 11px; }
   .principle-strip li+li { padding-left: 14px; }
@@ -314,9 +286,6 @@ h2 { font-size: clamp(30px, 3.2vw, 41px); line-height: 1.3; font-weight: 550; le
   .hero-actions { gap: 17px; }
   .hero-actions .button { font-size: 13px; padding-inline: 13px; gap: 13px; }
   .hero-actions .inline-link { font-size: 12px; }
-  .document-sheet { padding-inline: 22px; }
-  .project-example figcaption { display: block; }
-  .project-example figcaption a { display: inline-block; margin-top: 7px; }
   .profile-tabs { gap: 12px; }
   .profile-tabs button { font-size: 13px; }
   .phase-list>li { grid-template-columns: 95px 1fr; gap: 10px; }
