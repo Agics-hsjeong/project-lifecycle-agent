@@ -1,0 +1,9 @@
+---
+import CopyBlock from './CopyBlock.astro';
+interface Props { host: 'codex'|'claude'; }
+const {host}=Astro.props;
+---
+<div class="install-instructions" data-install-instructions={host}>
+ {host==='codex'?<><p class="install-where"><strong>Codex 대화 입력창</strong>에 아래 요청을 전달하세요.</p><CopyBlock label="설치와 실행 환경 확인 요청" buttonLabel="설치 요청 복사" text={'Agics-hsjeong/project-lifecycle-agent의 main을 marketplace로 등록하고 project-lifecycle-agent 플러그인을 설치해줘.\n설치·활성화 상태와 로딩 버전, Python 실행 환경을 확인해줘.'}/></>:<><p class="install-where"><strong>Claude Code 대화 입력창</strong>에서 1번을 실행한 뒤 2번을 실행하세요.</p><CopyBlock label="1. 마켓플레이스 등록" buttonLabel="1번 복사" text="/plugin marketplace add Agics-hsjeong/project-lifecycle-agent"/><CopyBlock label="2. 플러그인 설치" buttonLabel="2번 복사" text="/plugin install project-lifecycle-agent@project-lifecycle-marketplace"/><p class="install-scope">개인적으로 여러 프로젝트에서 사용할 때 설치 범위는 <strong>User</strong>를 선택합니다. 회사에서 관리하는 환경은 조직의 기준을 따릅니다.</p></>}
+ <p class="install-session">설치가 끝나면 <strong>새 채팅 또는 새 세션</strong>을 시작하고 업무 폴더를 여세요.</p>
+</div>

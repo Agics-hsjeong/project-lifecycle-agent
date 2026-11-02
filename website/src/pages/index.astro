@@ -2,11 +2,13 @@
 import release from '../../../plugin.json';
 import '../styles/home.css';
 import '../styles/visuals.css';
+import InstallInstructions from '../components/InstallInstructions.astro';
 import Brand from '../components/Brand.astro';
 import ProjectExplorer from '../components/ProjectExplorer.astro';
 import StartBuilder from '../components/StartBuilder.astro';
 import Experience from '../components/Experience.astro';
 import '../styles/studio.css';
+import '../styles/mobile.css';
 import TechnicalDiagram from '../components/TechnicalDiagram.astro';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const url = (path = '') => `${base}/${path}`;
@@ -87,7 +89,7 @@ const resources = [
           <p class="hero-description">RFP와 팀의 템플릿으로 시작해<br class="desktop-only"/> 요구사항, 산출물, 검토 기록을 연결합니다.</p>
           <p class="hero-definition">Codex · Claude Code용 오픈소스 프로젝트 관리 플러그인</p>
           <div class="hero-actions">
-            <a class="button" href="#start-builder">내 프로젝트 시작하기 <span aria-hidden="true">↗</span></a>
+            <a class="button" href={url('docs/quickstart/')}>처음부터 따라하기 <span aria-hidden="true">↗</span></a>
             <a class="inline-link" href="#architecture">구조 먼저 살펴보기 <span aria-hidden="true">↓</span></a>
           </div>
         </div>
@@ -152,16 +154,14 @@ const resources = [
       <section class="builder-section" id="start-builder" aria-labelledby="builder-title"><div class="container"><div class="section-intro"><div><p class="section-index">05 <span>/</span> 직접 시작하기</p><h2 id="builder-title">다음 프로젝트의 시작을,<br/>지금 그려보세요.</h2></div><p class="section-description">조건을 선택하면 첫 요청문이 준비됩니다.<br/>실제 작업은 설치한 AI 세션에서 이어갑니다.</p></div><StartBuilder /></div></section>
 
       <section class="container section install-section" id="install" aria-labelledby="install-title">
-        <div class="install-copy"><p class="section-index">06 <span>/</span> 설치하기</p><h2 id="install-title">지금 쓰는 AI에<br/>이음을 더하세요.</h2><ol class="getting-started"><li><span class="mono">01</span><div><strong>플러그인을 한 번 설치합니다.</strong><p>제품을 선택하고 설치 내용을 전달하세요.</p></div></li><li><span class="mono">02</span><div><strong>새 세션에서 업무 폴더를 엽니다.</strong><p>고객 자료는 플러그인 설치 폴더와 분리합니다.</p></div></li><li><span class="mono">03</span><div><strong>RFP나 사업 아이디어를 전합니다.</strong><p>자료 등록과 진행 기록은 에이전트가 처리합니다.</p></div></li></ol></div>
+        <div class="install-copy"><div class="install-heading"><p class="section-index">06 <span>/</span> 설치하기</p><h2 id="install-title">지금 쓰는 AI에<br/>이음을 더하세요.</h2><p class="install-context">컴퓨터에서 업무 폴더를 연 AI에 전달하세요. 휴대폰에서는 가이드 확인과 요청문 복사를 할 수 있습니다.</p></div><ol class="getting-started"><li><span class="mono">01</span><div><strong>플러그인을 한 번 설치합니다.</strong><p>제품을 선택하고 설치 내용을 전달하세요.</p></div></li><li><span class="mono">02</span><div><strong>새 세션에서 업무 폴더를 엽니다.</strong><p>고객 자료는 플러그인 설치 폴더와 분리합니다.</p></div></li><li><span class="mono">03</span><div><strong>RFP나 사업 아이디어를 전합니다.</strong><p>자료 등록과 진행 기록은 에이전트가 처리합니다.</p></div></li></ol></div>
         <div class="install-panel">
           <div class="install-tabs" role="tablist" aria-label="설치할 AI 선택"><button type="button" role="tab" id="install-tab-codex" aria-controls="install-codex" aria-selected="true" data-install-tab="codex">Codex</button><button type="button" role="tab" id="install-tab-claude" aria-controls="install-claude" aria-selected="false" tabindex="-1" data-install-tab="claude">Claude Code</button></div>
-          <div id="install-codex" role="tabpanel" aria-labelledby="install-tab-codex"><p class="install-instruction">Codex <strong>대화 입력창</strong>에 요청하세요.</p><pre id="codex-request" tabindex="0">Agics-hsjeong/project-lifecycle-agent의 main을
-marketplace로 등록하고 플러그인을 설치해줘.
-설치 버전과 실행 환경도 확인해줘.</pre><button type="button" class="copy-button" data-copy="codex-request" data-copy-label="설치 요청문 복사"><span>설치 요청문 복사</span><svg width="17" height="18" viewBox="0 0 17 18" fill="none" aria-hidden="true"><rect x="5" y="5" width="10" height="11" rx="1" stroke="currentColor"/><path d="M11 3V1H1v11h2" stroke="currentColor"/></svg></button><p class="copy-feedback" role="status" aria-live="polite"></p><a class="install-help" href={url('docs/install/codex/')}>터미널 설치 · 상세 안내 <span aria-hidden="true">↗</span></a></div>
-          <div id="install-claude" role="tabpanel" aria-labelledby="install-tab-claude" hidden><p class="install-instruction">Claude Code <strong>대화 입력창</strong>에 한 줄씩 입력하세요.</p><pre id="claude-command" tabindex="0">/plugin marketplace add Agics-hsjeong/project-lifecycle-agent
-/plugin install project-lifecycle-agent@project-lifecycle-marketplace</pre><button type="button" class="copy-button" data-copy="claude-command" data-copy-label="설치 명령 복사"><span>설치 명령 복사</span><svg width="17" height="18" viewBox="0 0 17 18" fill="none" aria-hidden="true"><rect x="5" y="5" width="10" height="11" rx="1" stroke="currentColor"/><path d="M11 3V1H1v11h2" stroke="currentColor"/></svg></button><p class="copy-feedback" role="status" aria-live="polite"></p><a class="install-help" href={url('docs/install/claude/')}>설치 범위 · 상세 안내 <span aria-hidden="true">↗</span></a></div>
+          <div id="install-codex" role="tabpanel" aria-labelledby="install-tab-codex"><InstallInstructions host="codex"/><a class="install-help" href={url('docs/install/codex/')}>설치 확인 · 상세 안내 <span aria-hidden="true">↗</span></a></div>
+          <div id="install-claude" role="tabpanel" aria-labelledby="install-tab-claude" hidden><InstallInstructions host="claude"/><a class="install-help" href={url('docs/install/claude/')}>설치 확인 · 상세 안내 <span aria-hidden="true">↗</span></a></div>
           <div class="install-version"><span class="version-dot" aria-hidden="true"></span><a href={releaseUrl}>v{release.version} · 베타 릴리스</a><span>설치 후 새 세션에서 사용</span></div>
         </div>
+        <div class="install-next"><div><strong>설치했다면, 내 자료로 시작하세요.</strong><p>새 세션에서 업무 폴더를 열고 RFP → 내 템플릿 → 제안서 제작 순서로 이어갑니다.</p></div><a data-install-next href={url('docs/quickstart/?host=codex&step=project')}>설치 후 프로젝트 만들기 <span aria-hidden="true">→</span></a></div>
       </section>
 
       <section class="container resources-section" aria-labelledby="resources-title"><div class="resource-heading"><p class="section-index">07 <span>/</span> 문서와 예제</p><h2 id="resources-title">필요할 때, 바로 찾아보세요.</h2></div><div class="resource-list">{resources.map((resource,i) => <a href={url(resource.path)} download={resource.download || undefined}><span class="resource-index mono">0{i+1}</span><div><h3>{resource.title}</h3><p>{resource.text}</p></div><span class="resource-action">{resource.action}<span aria-hidden="true">{resource.download?'↓':'↗'}</span></span></a>)}</div></section>
@@ -176,6 +176,7 @@ marketplace로 등록하고 플러그인을 설치해줘.
       function setupTabs(selector: string) {
         const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(selector));
         const activate = (selected: HTMLButtonElement) => {
+          if(selected.dataset.installTab){const link=document.querySelector<HTMLAnchorElement>('[data-install-next]');if(link)link.href=import.meta.env.BASE_URL.replace(/\/$/,'')+'/docs/quickstart/?host='+selected.dataset.installTab+'&step=project';}
           tabs.forEach(tab => {
             const active = tab === selected;
             tab.setAttribute('aria-selected', String(active)); tab.tabIndex = active ? 0 : -1;
@@ -211,25 +212,6 @@ marketplace로 등록하고 플러그인을 설치해줘.
           document.querySelectorAll<HTMLButtonElement>('[data-system-view]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
           const description = canvas.querySelector('.system-view-description');
           if (description) description.textContent = systemViews[view];
-        });
-      });
-      document.querySelectorAll<HTMLButtonElement>('[data-copy]').forEach(button => {
-        let timer: ReturnType<typeof setTimeout>;
-        button.addEventListener('click', async () => {
-          const source = document.getElementById(button.dataset.copy || '');
-          const feedback = button.parentElement?.querySelector('.copy-feedback');
-          const label = button.querySelector('span');
-          if (!source || !label || !feedback) return;
-          clearTimeout(timer);
-          try {
-            await navigator.clipboard.writeText(source.textContent || '');
-            label.textContent = '복사했습니다'; feedback.textContent = '대화 입력창에 붙여넣어 주세요.';
-            timer = setTimeout(() => { label.textContent = button.dataset.copyLabel || '복사'; }, 2200);
-          } catch {
-            const range = document.createRange(); range.selectNodeContents(source);
-            const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); source.focus();
-            label.textContent = button.dataset.copyLabel || '복사'; feedback.textContent = '내용을 선택했습니다. 직접 복사해 주세요.';
-          }
         });
       });
       const menu = document.querySelector<HTMLDetailsElement>('.mobile-menu');

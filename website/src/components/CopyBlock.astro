@@ -1,0 +1,23 @@
+---
+import '../styles/onboarding.css';
+interface Props { text: string; label: string; buttonLabel?: string; }
+const {text,label,buttonLabel='복사'}=Astro.props;
+---
+<copy-block class="copy-block"><div class="copy-block-heading"><span>{label}</span><button type="button" data-copy-block disabled>{buttonLabel}<span aria-hidden="true">↗</span></button></div><label><span class="copy-block-sr">{label} 내용</span><textarea readonly rows={Math.min(10,Math.max(2,text.split('\n').length))} spellcheck="false" aria-label={`${label} 내용`}>{text}</textarea></label><p class="copy-block-status" role="status" aria-live="polite">AI 대화 입력창에 전달할 내용입니다.</p></copy-block>
+<script>
+ class CopyBlock extends HTMLElement {
+  connectedCallback(){
+   if(this.dataset.ready)return;this.dataset.ready='true';
+   const button=this.querySelector<HTMLButtonElement>('[data-copy-block]');const input=this.querySelector<HTMLTextAreaElement>('textarea');const status=this.querySelector('.copy-block-status');if(!button||!input||!status)return;
+   button.disabled=false;
+   const resize=()=>{input.style.height='auto';input.style.height=Math.min(420,input.scrollHeight+3)+'px';};
+   let width=0;const observer=new ResizeObserver(entries=>{const next=entries[0]?.contentRect.width||0;if(next&&next!==width){width=next;resize();}});observer.observe(this);document.fonts.ready.then(()=>{if(this.isConnected)resize()});
+   this.addEventListener('copy-block-refresh',resize);
+   button.addEventListener('click',async()=>{button.disabled=true;try{await navigator.clipboard.writeText(input.value);status.textContent='복사했습니다. 선택한 AI의 대화 입력창에 붙여넣어 주세요.';}catch{input.focus({preventScroll:true});input.select();input.setSelectionRange(0,input.value.length);status.textContent='내용을 선택했습니다. 기기의 복사 메뉴로 직접 복사해 주세요.';}finally{button.disabled=false;}});
+   this.cleanup=()=>observer.disconnect();
+  }
+  cleanup?:()=>void;
+  disconnectedCallback(){this.cleanup?.();}
+ }
+ if(!customElements.get('copy-block'))customElements.define('copy-block',CopyBlock);
+</script>

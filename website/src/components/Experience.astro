@@ -1,4 +1,9 @@
 <script>
+ // Correct initial deep links once font metrics settle, without overriding user scrolling.
+ let hasInteracted=false;
+ for(const type of ['wheel','touchmove','pointerdown','keydown'])addEventListener(type,()=>{hasInteracted=true},{once:true,passive:true});
+ if(location.hash)document.fonts.ready.then(()=>requestAnimationFrame(()=>{if(hasInteracted)return;try{document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView({block:'start',behavior:'instant'});}catch{ /* An invalid fragment leaves normal navigation intact. */ }}));
+
  const reduced=matchMedia('(prefers-reduced-motion: reduce)');
  if(!reduced.matches && 'IntersectionObserver' in window){
   document.documentElement.classList.add('motion-ready');

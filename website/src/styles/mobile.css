@@ -1,0 +1,60 @@
+/* Mobile interaction audit: touch targets, focus sizing and stable navigation. */
+@media (max-width:800px), (pointer:coarse) {
+ .start-builder :is(textarea,select) { font-size:16px; }
+ .builder-hosts button,.builder-output-footer button,.builder-install,.system-lens button,.orbit-node { min-height:44px; }
+ .builder-checkbox { min-height:44px; align-items:center; }
+ .builder-checkbox input { width:22px; height:22px; }
+ .ieum-brand { min-height:44px; }
+ .inline-link,.install-help { min-height:44px; align-items:center; }
+ .install-help { padding-block:12px; }
+}
+@media (max-width:800px) {
+ :root { --sl-menu-button-size:2.75rem; }
+ .install-copy { display:contents; }
+ .install-heading { order:0; }
+ .install-panel { order:1; margin:0; }
+ .getting-started { order:2; margin-top:0; }
+ .install-heading h2 { font-size:31px; }
+ .install-context { font-size:13px; line-height:1.8; margin-top:17px; color:var(--muted); }
+ .install-next { order:3; }
+ .docs-search site-search button[data-open-modal] { width:44px!important; height:44px!important; min-height:44px!important; }
+ header.header { padding-inline-end:calc(var(--sl-menu-button-size) + var(--sl-nav-pad-x) + 14px)!important; }
+ button.sl-menu-button,.back-to-top { min-height:44px; min-width:44px; }
+ .back-to-top { right:max(18px,env(safe-area-inset-right)); bottom:max(18px,env(safe-area-inset-bottom)); }
+ .mobile-menu nav { max-height:calc(100svh - 74px); overflow-y:auto; overscroll-behavior:contain; }
+ .site-header .mobile-menu summary { min-height:44px; }
+ .figure-toolbar a { min-height:44px; }
+ .technical-figure figcaption>a { min-height:44px; display:inline-flex; align-items:center; }
+ .sidebar-content li a { min-height:44px; }
+ .guide-hub>a { min-height:110px; }
+}
+.install-context { font-size:13px; line-height:1.8; margin-top:18px; color:var(--muted); }
+.install-next { grid-column:1/-1; display:flex; align-items:center; justify-content:space-between; gap:20px; padding:23px 25px; background:#edf7f2; border:1px solid #c6ddd4; border-radius:12px; }
+.install-next strong { display:block; font-size:17px; letter-spacing:-.025em; font-weight:550; }
+.install-next p { font-size:13px; line-height:1.8; color:var(--muted); margin-top:7px; }
+.install-next a { min-height:46px; display:inline-flex; align-items:center; justify-content:center; gap:15px; padding:12px 17px; background:#165b60; color:#fff; border-radius:8px; white-space:nowrap; font-size:13px; }
+.beginner-entry { display:block; padding:23px; border:1px solid var(--docs-border,#c9deda); border-radius:13px; background:var(--docs-wash,#eef7f2); margin-block:25px; }
+.beginner-entry strong { display:block; font-size:18px; color:var(--sl-color-white,#193d45); letter-spacing:-.035em; }
+.beginner-entry p { margin-top:9px; font-size:13px; line-height:1.8; }
+.beginner-entry a { display:inline-flex; align-items:center; min-height:44px; margin-top:12px; font-size:13px; font-weight:550; }
+@media (max-width:600px) {
+ .install-next { display:block; padding:21px; }
+ .install-next a { display:flex; margin-top:17px; font-size:13px; white-space:normal; }
+ .install-next strong { font-size:16px; }
+}
+
+@media(max-width:800px) {
+ .install-next { order:2; }
+ .getting-started { order:3; }
+}
+/* Reusable widget rules have greater specificity than their desktop defaults. */
+@media (max-width:800px), (pointer:coarse) {
+ start-builder.start-builder textarea,
+ start-builder.start-builder select { font-size:16px; }
+ .project-explorer .orbit-node,
+ .start-builder .builder-hosts button,
+ .start-builder .builder-output-footer button,
+ .start-builder .builder-install,
+ .system-lens button[data-system-view] { min-height:44px; }
+ .start-builder .builder-checkbox input { width:22px; height:22px; }
+}
