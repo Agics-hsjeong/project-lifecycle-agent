@@ -266,7 +266,7 @@ Project Lifecycle Agent의 설치 소스와 버전을 확인하고 최신 main�
 
 ## 상세 문서와 개발자 안내
 
-웹사이트 소스는 [website/](website/README.md)에 있으며 Astro·Starlight로 구성합니다. GitHub Actions에서 사이트 빌드·내부 링크를 검사하고 GitHub Pages로 배포합니다. 웹 의존성과 다운로드 자료는 기존 Python 플러그인 패키지와 분리합니다. 사이트는 소개·가이드·공개 예제를 제공하며 실제 고객 자료 처리는 사용자의 Codex·Claude Code에서 수행합니다.
+웹사이트 소스는 [website/](website/README.md)에 있으며 Astro·Starlight로 구성합니다. 소개 페이지에서 사업 유형별 진행 흐름과 템플릿·설치 요청을 확인할 수 있습니다. 화면 수정 시 [디자인·접근성 기준](website/DESIGN.md)을 참고하세요. GitHub Actions에서 사이트 빌드·내부 링크를 검사하고 GitHub Pages로 배포합니다. 웹 의존성과 다운로드 자료는 기존 Python 플러그인 패키지와 분리합니다. 사이트는 소개·가이드·공개 예제를 제공하며 실제 고객 자료 처리는 사용자의 Codex·Claude Code에서 수행합니다.
 
 | 문서 | 내용 |
 | --- | --- |

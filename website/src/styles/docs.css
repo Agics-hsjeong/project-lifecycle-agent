@@ -1,16 +1,23 @@
+@import './fonts.css';
 :root {
   --sl-color-accent-low: #073d44;
-  --sl-color-accent: #087f8c;
+  --sl-color-accent: #16838b;
   --sl-color-accent-high: #b0e2dc;
-  --sl-font: 'Pretendard', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif;
+  --sl-font: var(--font-ui);
 }
 :root[data-theme='light'] {
-  --sl-color-accent-low: #d8efeb;
-  --sl-color-accent: #08717c;
-  --sl-color-accent-high: #0a454d;
+  --sl-color-accent-low: #e5f0ea;
+  --sl-color-accent: #08747b;
+  --sl-color-accent-high: #064950;
+  --sl-color-bg-nav: #fcfdfb;
+  --sl-color-bg-sidebar: #f7f9f5;
 }
-.site-title { font-weight: 800; letter-spacing: -.04em; }
+.site-title { font-weight: 650; letter-spacing: -.045em; }
 .sl-markdown-content { line-height: 1.85; word-break: keep-all; overflow-wrap: anywhere; }
-.sl-markdown-content h2 { letter-spacing: -.035em; }
+.sl-markdown-content h1,.sl-markdown-content h2,.sl-markdown-content h3 { letter-spacing: -.035em; font-weight: 600; }
+.sl-markdown-content h2 { margin-top: 2.2em; }
 .sl-markdown-content pre { word-break: normal; }
-header.header { backdrop-filter: blur(16px); }
+header.header { backdrop-filter: none; }
+.sidebar-content a { border-radius: 3px; }
+/* The search button keeps aria-keyshortcuts; show its single visible label clearly. */
+site-search button[data-open-modal] > kbd { display: none !important; }
