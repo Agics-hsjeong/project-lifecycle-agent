@@ -1,0 +1,86 @@
+@import './fonts.css';
+:root {
+  --ieum-night:#07171d;
+  --ieum-night-raised:#10272e;
+  --ieum-mint:#8cf3ce;
+  --ieum-teal:#08747b;
+  --ieum-blue:#b2b8ff;
+  --ieum-gold:#ead3a2;
+  --ieum-paper:#f5f8f7;
+  --ieum-text:#19353b;
+  --ieum-radius:18px;
+  --ieum-radius-lg:28px;
+  --ieum-line:rgba(163,203,197,.18);
+  --ieum-shadow:0 24px 70px -35px #04161e55;
+  --ieum-ease:cubic-bezier(.22,1,.36,1);
+}
+.ieum-brand {
+  display:inline-flex;
+  align-items:center;
+  gap:11px;
+  color:#f3fcf8;
+  text-decoration:none;
+  flex-shrink:0;
+  line-height:1.2;
+}
+.ieum-brand-mark {
+  display:grid;
+  place-items:center;
+  width:44px;
+  height:38px;
+  border-radius:11px;
+  background:#edf9f4;
+  border:1px solid #b9dfd0;
+  box-shadow:0 0 25px #8cf3ce13;
+}
+.ieum-brand-mark img {
+  width:34px;
+  height:23px;
+  object-fit:contain;
+}
+.ieum-brand-word {
+  font-size:19px;
+  font-weight:700;
+  letter-spacing:-.055em;
+}
+.ieum-brand-word small {
+  display:block;
+  margin-top:5px;
+  font:8px/1.1 Consolas,monospace;
+  letter-spacing:.22em;
+  color:#adcec9;
+}
+.ieum-eyebrow {
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font:11px/1.6 Consolas,monospace;
+  letter-spacing:.13em;
+  text-transform:uppercase;
+}
+.ieum-eyebrow::before {
+  content:'';
+  width:6px;
+  height:6px;
+  flex-shrink:0;
+  background:var(--ieum-mint);
+  border-radius:2px;
+  box-shadow:0 0 14px #8cf3ce66;
+}
+@media(max-width:480px) {
+  .ieum-brand-word {
+    font-size:17px
+  }
+  .ieum-brand-mark {
+    width:36px;
+    height:33px
+  }
+  .ieum-brand-mark img {
+    width:28px;
+    height:20px
+  }
+  .ieum-brand-word small {
+    font-size:7px;
+    letter-spacing:.16em
+  }
+}

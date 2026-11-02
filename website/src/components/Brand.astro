@@ -1,0 +1,5 @@
+---
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+const {href=`${base}/`}=Astro.props;
+---
+<a class="ieum-brand" href={href}><span class="ieum-brand-mark"><img src={`${base}/brand/symbol.png`} alt="" width="34" height="23"/></span><span class="ieum-brand-word">프로젝트이음<small>PROJECT IEUM</small></span></a>

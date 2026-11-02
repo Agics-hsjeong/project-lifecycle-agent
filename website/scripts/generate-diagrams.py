@@ -16,6 +16,9 @@ def circle(x,y,r=3,fill='#b8e9ce'):
 def svg(name,w,h,title,desc,body,dark=False):
     defs='''<defs><pattern id="grid-NAME" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="COLOR" stroke-width=".6"/></pattern><linearGradient id="surface-NAME" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#e0f4e5"/><stop offset="1" stop-color="#90c6b0"/></linearGradient><linearGradient id="side-NAME" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#729f8b"/><stop offset="1" stop-color="#2f6256"/></linearGradient></defs>'''.replace('NAME',name).replace('COLOR','#25483e' if dark else '#d6e2d7')
     out=f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img" aria-labelledby="art-title-{name} art-desc-{name}" style="font-family:Pretendard,'Malgun Gothic','Apple SD Gothic Neo',sans-serif"><title id="art-title-{name}">{escape(title)}</title><desc id="art-desc-{name}">{escape(desc)}</desc>{defs}{body}</svg>'''
+    if name.startswith('architecture'):
+        for before, after in [('#102d29','#0b2028'),('#25483e','#244550'),('#173c34','#15333e'),('#1a4238','#1b3e47'),('#436556','#466876'),('#668b73','#5a7f8a')]:
+            out=out.replace(before,after)
     (P/(name+'.svg')).write_text(out,encoding='utf-8')
 def card(x,y,w,h,title,sub,dark=False,tag=None):
     bg='#173c34' if dark else '#fff'; border='#436556' if dark else '#ceddd2'; fg='#e5f2e8' if dark else INK; small='#b4c9b9' if dark else MUTED

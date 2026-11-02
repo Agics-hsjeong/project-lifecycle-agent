@@ -38,3 +38,12 @@ PDF 재생성 소스는 `scripts/build-manual.py`입니다. 선택적 제작 의
 `.github/workflows/website.yml`이 빌드와 내부 링크·파일 검사를 수행합니다. main 반영 시 GitHub Pages에 배포하고, PR에서는 빌드만 검증합니다. 저장소 Settings → Pages의 Source는 **GitHub Actions**여야 합니다.
 
 웹 소스·Node 의존성·예제·PDF는 Python 플러그인 배포 패키지의 허용 목록에 추가하지 않습니다. 고객 데이터와 별개로 관리합니다.
+
+## 공통 디자인과 인터랙션
+
+- src/styles/tokens.css: 공통 색상·재질·서체. studio.css: 랜딩, docs.css: 문서, widgets.css: 재사용 상호작용.
+- src/components/Brand.astro: 공통 브랜드. docs/: Starlight 공식 헤더·사이드바·제목·하단 확장.
+- ProjectExplorer.astro: 설명용 단계 탐색. StartBuilder.astro: 호스트·프로필·템플릿 조건별 요청문. 실제 고객 작업은 호스트 AI에서 수행한다.
+- start.mdx·first-project.mdx는 기존 공개 주소를 유지하며 같은 시작 도구를 포함한다. 새 의존성이나 별도 서버는 필요하지 않다.
+
+스타일 수정 시 랜딩과 문서의 밝은/어두운 테마, 좁은 화면, 키보드·검색·복사 실패·reduced-motion을 함께 확인한다. 세부 기준과 검증 범위는 [DESIGN.md](DESIGN.md)에 기록한다.

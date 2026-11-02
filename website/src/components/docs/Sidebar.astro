@@ -1,0 +1,8 @@
+---
+import DefaultSidebar from '@astrojs/starlight/components/Sidebar.astro';
+import release from '../../../../plugin.json';
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+---
+<div class="docs-sidebar-intro"><span class="ieum-eyebrow">KNOWLEDGE BASE</span><p>작업을 잇는 가이드.</p><a href={`https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v${release.version}`}>v{release.version}<span>베타</span></a></div>
+<DefaultSidebar/>
+<a class="docs-sidebar-cta" href={`${base}/docs/first-project/`}><span class="sidebar-cta-orb" aria-hidden="true">↗</span><strong>내 프로젝트 시작하기</strong><span>자료 준비부터 첫 요청까지</span></a>

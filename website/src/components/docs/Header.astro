@@ -1,0 +1,8 @@
+---
+import Brand from '../Brand.astro';
+import Search from '@astrojs/starlight/components/Search.astro';
+import ThemeSelect from '@astrojs/starlight/components/ThemeSelect.astro';
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+---
+<div class="docs-header-inner"><Brand/><span class="docs-header-divider" aria-hidden="true"></span><a class="docs-header-label" href={`${base}/docs/start/`}>문서와 가이드</a><div class="docs-search"><Search/></div><nav class="docs-header-nav" aria-label="사이트 메뉴"><a href={`${base}/`}>소개</a><a href="https://github.com/Agics-hsjeong/project-lifecycle-agent">GitHub <span aria-hidden="true">↗</span></a></nav><div class="docs-theme"><ThemeSelect/></div></div>
+<div class="reading-progress" aria-hidden="true"><span></span></div>

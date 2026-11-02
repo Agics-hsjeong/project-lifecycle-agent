@@ -1,0 +1,8 @@
+---
+const {entry}=Astro.locals.starlightRoute;
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+const id=entry.id;
+const section=id.includes('/install/')?'설치와 연결':id.includes('/guides/')?'업무별 가이드':id.includes('/reference/')?'참고와 문제 해결':id.includes('/examples/')?'공개 예제':'처음 시작하기';
+const minutes=Math.max(1,Math.ceil((entry.body||'').replace(/<[^>]*>/g,'').length/650));
+---
+<div class="docs-page-heading"><nav class="docs-breadcrumbs" aria-label="문서 경로"><a href={`${base}/docs/start/`}>문서</a><span aria-hidden="true">/</span><span>{section}</span></nav><div class="docs-page-kicker"><span class="ieum-eyebrow">PROJECT IEUM / GUIDE</span><span>약 {minutes}분 읽기</span></div><h1 id="_top">{entry.data.title}</h1>{entry.data.description&&<p class="docs-page-description">{entry.data.description}</p>}<div class="docs-page-tools"><span><i aria-hidden="true"></i> 제안부터 운영까지, 같은 기준으로.</span><button type="button" data-copy-page>링크 복사 <span aria-hidden="true">↗</span></button><span class="page-copy-feedback" role="status" aria-live="polite"></span></div></div>
