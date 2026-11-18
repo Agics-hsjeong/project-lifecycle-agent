@@ -1,12 +1,12 @@
 {
   "name": "project-lifecycle-agent",
-  "version": "2.0.0-beta.1",
-  "description": "RFP와 사업 아이디어에서 제안·설계·개발·납품·유지보수까지 프로젝트 프로세스를 관리합니다.",
+  "version": "2.0.0-beta.2",
+  "description": "Codex·Claude Code에서 제안·기획·설계·개발·검증·인수인계를 돕는 프로젝트 스타트팩 에이전트입니다.",
   "skills": "./skills/",
   "requires_local_executor": true,
   "interface": {
     "displayName": "프로젝트이음 · Project Ieum",
-    "shortDescription": "사업부터 개발·운영까지 자연어로 프로젝트 관리",
+    "shortDescription": "역할별 협업을 돕는 프로젝트 스타트팩 에이전트",
     "defaultPrompt": [
       "이 제안요청서로 새 프로젝트를 시작해줘."
     ]

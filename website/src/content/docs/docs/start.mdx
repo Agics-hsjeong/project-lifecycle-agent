@@ -7,7 +7,7 @@ import StartBuilder from '../../../components/StartBuilder.astro';
 import GuideHub from '../../../components/GuideHub.astro';
 
 
-자료와 목표를 전하면 에이전트가 **프로젝트 생성부터 산출물·검수·진행 기록까지** 관리합니다. 사용하는 AI에 설치한 뒤 업무 폴더에서 시작하세요.
+프로젝트이음은 **프로젝트 스타트팩 에이전트**입니다. 자료와 목표를 전하면 필요한 절차·양식·역할을 선택해 프로젝트 준비부터 산출물·검수·진행 기록까지 돕습니다. 사용하는 AI에 설치한 뒤 업무 폴더에서 시작하세요.
 
 <GuideHub />
 
@@ -32,7 +32,9 @@ Project Lifecycle Agent로 첨부한 RFP의 외주 사업을 시작해줘.
 환경 점검, 원본 등록, 요구사항·고객 질문·제안 준비와 기록 관리를 처리해줘.
 ```
 
-프로젝트이음의 스킬 이름은 `project-lifecycle`입니다. 자동으로 선택되지 않으면 Codex에서 `$project-lifecycle`, Claude Code에서 `/project-lifecycle-agent:project-lifecycle`를 호출합니다.
+자동으로 선택되지 않으면 Codex에서 `$ieum`을 호출하세요. Claude Code는 “프로젝트이음으로 시작하고 짧은 명령도 준비해줘”라고 요청해 고객 프로젝트에 별칭을 준비한 뒤 `/ieum`을 사용합니다. 별칭 준비 전에는 `/project-lifecycle-agent:ieum`으로 진입할 수 있습니다. 기존 호출도 계속 지원합니다.
+
+**역할명을 알거나 “팀으로 처리해줘”라고 덧붙일 필요는 없습니다.** 작업의 범위·의존성·검증 필요성에 따라 필요한 역할과 하위 에이전트를 선택합니다. [자동 역할 실행과 쉬운 명령 사용법](../guides/agents/)을 확인하세요.
 
 ## 4. 과거 자료의 스타일을 활용하세요
 

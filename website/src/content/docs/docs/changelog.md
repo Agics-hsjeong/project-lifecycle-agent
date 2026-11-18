@@ -3,6 +3,14 @@ title: 변경 이력
 description: 프로젝트이음의 브랜드·문서 사이트와 플러그인 기능 변경을 확인합니다.
 ---
 
+## 2.0.0-beta.2 — 자동 역할 실행
+
+2026-11-19. 팀이라는 추가 요청 없이 필요한 역할·작업자를 선택해 실행합니다. 18개 역할 계약, Codex `$ieum`과 Claude 프로젝트별 `/ieum` 별칭, 기존 설정 보존·실행 증거·인수인계를 제공합니다.
+
+Codex CLI 0.170.0과 Claude Code 2.1.327에서 자동 전문 작업자 실행과 새 세션 이어하기를 확인했습니다. 생성 프로젝트 테스트는 각각 12개·9개, 저장소 전체 회귀는 114개 통과했습니다. [역할 사용 가이드](../guides/agents/)와 [실제 검증 범위·제한](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/main/docs/HOST-VALIDATION.md)을 확인하세요.
+
+[beta.2 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.2)
+
 ## 2.0.0-beta.1 — 베타
 
 2026-11-03. 실행 프로필·릴리스 범위·작업 재개·관리 변경 복원·출력 검수·로컬 현황, 기존 프로젝트의 이행 미리보기·관리정보 백업·되돌리기를 제공합니다. 설치본의 경로·버전·패키지 무결성을 진단합니다. [v2 사용과 업데이트](../guides/v2/)를 참고하세요.
