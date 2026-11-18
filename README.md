@@ -1,20 +1,37 @@
 # 프로젝트이음 · Project Ieum
 
-제안부터 운영까지, 프로젝트의 모든 단계를 잇습니다.
+**Codex·Claude Code를 위한 프로젝트 스타트팩 에이전트.** 제안부터 운영까지 필요한 절차·지침·양식·역할을 연결합니다.
 
 **[소개·사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/) · [처음 시작하기](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/start/) · [공개 예제](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/examples/portal/) · [사용자 매뉴얼 PDF](https://agics-hsjeong.github.io/project-lifecycle-agent/downloads/project-ieum-user-guide.pdf)**
 
-표시 브랜드는 **프로젝트이음(Project Ieum)**입니다. 설치 ID는 기존 `project-lifecycle-agent`, marketplace는 `project-lifecycle-marketplace`, 스킬 호출은 `project-lifecycle`을 사용합니다.
+표시 브랜드는 **프로젝트이음(Project Ieum)**입니다. 설치 ID는 기존 `project-lifecycle-agent`, marketplace는 `project-lifecycle-marketplace`, 기존 스킬 호출 `project-lifecycle`은 계속 지원합니다. 쉬운 이음 호출과 자동 역할 실행은 아래 beta.2 안내를 확인하세요.
 
 **제안요청서와 예전 제안서·발표자료를 전달하면, Codex와 Claude Code가 제안 작성부터 프로젝트 운영까지 돕는 오픈소스 플러그인입니다.** 외주/SI와 자체 서비스 프로젝트에 사용할 수 있습니다.
 
 사용자는 업무 자료·목표·사업 결정을 전달합니다. 에이전트는 폴더 생성, 원본 등록, 분석, 산출물 제작, 검수와 진행 기록을 처리합니다. 일상적으로 PowerShell 명령을 입력하거나 JSON·CSV를 편집할 필요는 없습니다.
 
-현재 베타 버전: **2.0.0-beta.1** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
+현재 베타 버전: **2.0.0-beta.2** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
 
 v2 베타 버전입니다. SI·제품·API·유지보수 프로필, 릴리스 범위, 실행·중단·재개, 변경 복원, 제안 출력 검수와 로컬 현황을 제공합니다. 기존 프로젝트는 **“설치 버전을 확인하고, 이 프로젝트의 v2 이행 미리보기를 확인한 뒤 백업하고 적용해줘”**라고 요청하세요. 관리 버전만 갱신하며 기존 문서·ID·단계를 새 기본형으로 덮어쓰지 않습니다.
 
-**베타 버전이므로 기존 안정판과 구분해 사용하세요.** 재현 가능한 설치에는 `v2.0.0-beta.1` 태그를 지정하고, 기존 설치는 실제 로딩 버전을 확인한 뒤 업데이트하세요. [베타 릴리스와 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.1) [v2 사용·이행 안내](docs/V2-IMPLEMENTATION.md) · [검증 기록](docs/VALIDATION.md)
+**베타 버전이므로 기존 안정판과 구분해 사용하세요.** 재현 가능한 설치에는 공개된 릴리스 태그를 지정하고, 기존 설치는 실제 로딩 버전을 확인한 뒤 업데이트하세요. 이전 버전은 [v2.0.0-beta.1 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.1)에서 확인할 수 있습니다. [beta.2 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.2) · [실제 호스트 검증](docs/HOST-VALIDATION.md) · [v2 사용·이행 안내](docs/V2-IMPLEMENTATION.md) · [검증 기록](docs/VALIDATION.md)
+
+## 이음 명령과 자동 역할 실행 — 2.0.0-beta.2
+
+“**이음 시작해줘 / 이음 기획해줘 / 이음 제안해줘 / 이음 검토해줘 / 이음 이어서 해줘**”처럼 요청할 수 있는 진입 스킬과 **18개 역할 계약**을 추가했습니다. 새 소스를 로딩한 Codex는 `$ieum`, Claude Code는 프로젝트별 별칭 설정 후 **`/ieum`**으로 호출합니다. 별칭 준비는 “프로젝트이음으로 시작하고 짧은 명령도 준비해줘”라고 자연어로 요청합니다. 긴 플러그인 호출은 진단용으로 유지합니다. 기존 호출과 설치 ID는 유지합니다.
+
+- 기획·전략: PO / 기능 명세 / UX 리서치·정보설계
+- 디자인: 디자인 시스템 / UI 디자이너 / UX 라이터
+- 개발: 시스템 아키텍트 / DB / 백엔드 / 프론트엔드·퍼블리싱 / DevOps
+- 품질: QA / 보안 감사 / 테크니컬 라이터
+- 협업: 오케스트레이터 / 코드 리뷰어
+- 제안: 정성제안 전략 / 정성제안서·발표자료 제작
+
+역할명을 지정하거나 “팀으로 처리해줘”라고 덧붙일 필요가 없습니다. 요청 내용·현재 단계·필요한 산출물을 보고 **필요한 최소 역할을 자동 선택**합니다. 질문·도움말·간단한 수정은 현재 에이전트가 처리하고, 복합 구현·독립 검토에는 사용 가능한 하위 에이전트를 실행합니다. 선행 계약을 확인하고 담당 경로를 나누며, 결과 검증과 공통 원장·인수인계는 주 에이전트가 통합합니다.
+
+Claude Code는 플러그인의 네이티브 역할 파일을 사용하고, Codex는 필요한 프로젝트별 설정을 준비합니다. 기존 설정은 덮어쓰지 않습니다. 호스트가 위임을 지원하지 않거나 인증·권한·실행 한도로 실행하지 못하면 실제 제한과 대체 수행 방식을 보고하며, 별도 작업자를 실행했다고 표시하지 않습니다.
+
+**beta.2 기능이며 이전 `v2.0.0-beta.1` 릴리스에는 포함되지 않습니다.** 실제 설치된 버전과 호스트 역할 로딩을 확인하세요. 이 문서는 릴리스 준비 중이며 실제 호스트 검증·배포 결과는 검증 기록으로 구분합니다. [사용법·연결 방식·검증 범위](docs/ROLE-AGENTS.md) · [웹 사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/guides/agents/)
 
 ## 처음 사용한다면 이 순서로 진행하세요
 
@@ -69,10 +86,10 @@ Marketplace 등록 방식은 [OpenAI 공식 플러그인 문서](https://develop
 
 | 제품 | 대화 입력창에 입력 |
 | --- | --- |
-| Codex | `$project-lifecycle` |
-| Claude Code | `/project-lifecycle-agent:project-lifecycle` |
+| Codex | `$ieum` |
+| Claude Code | `/ieum` — 프로젝트별 별칭 설정 후 |
 
-스킬을 선택한 뒤 아래 단계의 요청문을 전달하세요. 제품이 요구하는 파일 접근·설치 권한은 해당 제품 화면에서 허용해야 합니다.
+처음에는 자연어로 “프로젝트이음으로 시작하고 짧은 명령도 준비해줘”라고 요청할 수 있습니다. Claude Code 별칭 준비 전에는 `/project-lifecycle-agent:ieum`으로 진입합니다. 기존 `$project-lifecycle`, `/project-lifecycle-agent:project-lifecycle` 호출도 유지합니다. 제품이 요구하는 파일 접근·설치 권한은 해당 제품 화면에서 허용해야 합니다.
 
 ## 2. 작업 폴더를 열고 RFP로 시작하기
 

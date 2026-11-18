@@ -6,13 +6,19 @@ import json
 import os
 import stat
 import tempfile
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-FOLDERS = (".codex-plugin", ".claude-plugin", "skills", "blueprint", "tools", "tests", "docs")
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+FOLDERS = (".codex-plugin", ".claude-plugin", "skills", "agents", "blueprint", "tools", "tests", "docs")
 FILES = ("plugin.json", "README.md", "CHANGELOG.md", "AGENTS.md", ".gitignore", ".gitattributes", "LICENSE", "CONTRIBUTING.md", ".agents/plugins/marketplace.json", ".github/workflows/ci.yml")
 
 
 def package(output=None):
+    from tools import role_agents
+    if not role_agents.build(check=True)["ready"]:
+        raise ValueError("역할 정의가 원천 계약과 다릅니다. role_agents.py build로 재생성하세요.")
     metadata = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
     manifests = [metadata] + [json.loads((ROOT / name).read_text(encoding="utf-8")) for name in ("plugin.json", ".claude-plugin/plugin.json")]
     if len({(item["name"], item["version"]) for item in manifests}) != 1:

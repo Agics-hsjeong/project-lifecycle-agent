@@ -14,7 +14,7 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8'))['version']
-MANUAL_DATE = '2026.11.03'
+MANUAL_DATE = '2026.11.19'
 OUT = ROOT / f'output/pdf/프로젝트이음-사용자매뉴얼-{VERSION}.pdf'
 (ROOT / 'tmp/pdfs').mkdir(parents=True, exist_ok=True)
 OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -146,7 +146,7 @@ body('설치 도구를 사용할 수 있는 환경에서는 에이전트가 처�
 card('직접 설치할 때만: 터미널에 한 줄씩 입력', 'codex plugin marketplace add Agics-hsjeong/project-lifecycle-agent --ref main\ncodex plugin add project-lifecycle-agent@project-lifecycle-marketplace', code=True)
 sub('설치 후')
 body('새 채팅을 시작하거나 앱을 다시 엽니다. 앱의 플러그인 목록에서 project-lifecycle-marketplace의 설치·활성화 상태를 확인할 수 있습니다. 자동으로 스킬이 선택되지 않으면 아래 이름을 대화 입력창에서 호출합니다.')
-card('명시적 스킬 호출', '$project-lifecycle', code=True)
+card('짧은 스킬 호출', '$ieum', code=True)
 body('codex 명령을 찾지 못하면 “CLI 위치와 설치 가능한 방법을 진단해줘”라고 요청하세요. 매 프로젝트마다 설치 명령을 반복하지 않습니다.')
 body('이 플러그인은 GitHub 저장소를 marketplace로 직접 등록하는 방식입니다. 공식 디렉터리에 기본 등록된 항목이라는 의미는 아닙니다.')
 
@@ -155,25 +155,26 @@ chapter(3, 'Claude Code에 설치하기', 'ONE-TIME SETUP / 03')
 body('일반 Claude 웹 채팅이 아닌 <b>Claude Code</b>에서 사용합니다. 두 제품을 오가려면 Codex와 Claude Code에 각각 설치하세요.')
 card('Claude Code 대화 입력창에 한 줄씩 입력', '/plugin marketplace add Agics-hsjeong/project-lifecycle-agent\n/plugin install project-lifecycle-agent@project-lifecycle-marketplace', code=True)
 body('위 명령은 PowerShell이나 일반 터미널에 붙여 넣는 명령이 아닙니다. Claude Code의 대화 입력창에서 실행합니다. 설치 범위 선택 화면이 나오면 여러 프로젝트에서 개인적으로 쓸 경우 <b>User</b>를 선택합니다.')
-sub('설치 후 새 세션 시작')
-body('/plugin에서 설치·활성화 상태를 볼 수 있습니다. 새 세션을 시작한 뒤 프로젝트 작업을 요청하세요. 자동 선택되지 않으면 다음 스킬을 명시적으로 호출합니다.')
-card('명시적 스킬 호출', '/project-lifecycle-agent:project-lifecycle', code=True)
-sub('두 제품의 사용 방식')
+sub('짧은 명령 준비')
+card('처음 한 번 자연어로 요청', '프로젝트이음으로 시작하고 짧은 명령도 준비해줘.')
+body('고객 프로젝트 폴더를 열고 /ieum 표시를 확인합니다. 기존 동명 명령은 덮어쓰지 않습니다.')
+card('별칭 설정 후 짧게 요청', '/ieum 제안서와 발표자료를 만들어줘.', code=True)
+sub('두 제품의 공통점과 차이')
 table(['공통', '제품별'], [
     ['같은 프로젝트 폴더·관리 파일을 사용', '설치와 활성화는 각 제품에서 수행'],
     ['RFP·템플릿·산출물을 파일로 보존', '대화 기록은 자동으로 동기화되지 않음'],
     ['자연어로 같은 업무 요청 가능', '파일 접근과 외부 서비스 권한은 각 호스트 설정 적용'],
 ], [.5, .5])
-body('고객 업무 폴더는 플러그인 설치 폴더와 분리합니다. 다음 페이지에서 업무용 폴더를 열고 첫 프로젝트를 시작합니다.')
+body('필요한 역할과 작업자는 자동 선택합니다. 팀을 따로 요청하지 않아도 됩니다. 단순 질문은 직접 처리하고 복합 작업은 나누어 위임합니다.')
 
 # 05 - Init
 chapter(4, 'RFP 또는 아이디어로 시작하기', 'PROJECT START / 04')
 body('업무용 폴더, 예를 들어 “내 프로젝트”를 Codex 또는 Claude Code에서 엽니다. RFP 파일을 첨부하거나 에이전트가 읽을 수 있는 실제 경로를 알려주세요.')
-card('외주/SI: A사 고객 포털 예시', 'Project Lifecycle Agent로 A사 고객 포털 사업을 시작해줘.\n현재 작업 폴더를 업무 공간으로 쓰고 식별자는 a-portal로 해줘.\n외주/SI 사업이고, 제안요청서는 [실제 RFP 파일 경로]에 있어.\n\n프로젝트와 참고 템플릿 폴더를 준비하고 원본을 등록해줘.\n사업 검토 초안, 요구사항, 평가기준, 제출 조건과 고객 질문을 정리해줘.\n미정인 예산·일정·실적은 가정 또는 확인 필요로 표시해줘.\n환경 확인, 파일 생성과 기록 관리는 네가 처리해줘.')
+card('외주/SI: A사 고객 포털 예시', '프로젝트이음으로 A사 고객 포털 사업을 시작해줘.\n현재 작업 폴더를 업무 공간으로 쓰고 식별자는 a-portal로 해줘.\n외주/SI 사업이고, 제안요청서는 [실제 RFP 파일 경로]에 있어.\n\n프로젝트와 참고 템플릿 폴더를 준비하고 원본을 등록해줘.\n사업 검토 초안, 요구사항, 평가기준, 제출 조건과 고객 질문을 정리해줘.\n미정인 예산·일정·실적은 가정 또는 확인 필요로 표시해줘.\n환경 확인, 파일 생성과 기록 관리는 네가 처리해줘.')
 body('대괄호 부분은 실제 파일 위치로 바꿉니다. 첨부를 쓴다면 “첨부한 RFP”라고 요청합니다. 에이전트가 실제 접근 가능한 원본을 확보한 뒤 등록합니다.')
 sub('시작하면 만들어지는 것')
 body('<b>projects/a-portal/</b>에 원본과 입력 출처, 요구사항·작업 기록, 사업 검토 초안과 HANDOFF.md 등을 준비합니다. 요구사항에는 원문 페이지·절과 수용 기준을 연결합니다. 같은 이름의 기존 프로젝트는 덮어쓰지 않습니다.')
-card('자체 서비스: RFP 없이 시작', 'Project Lifecycle Agent로 학원 상담·수강 신청 서비스를 시작해줘.\n자체 서비스 프로젝트이고 식별자는 academy-service야.\n대상은 소규모 학원이고 목표는 상담 누락과 신청 관리 시간 감소야.\n사업 가설, 사용자 문제, MVP 범위, 성공 지표와 실행 계획을 작성해줘.\n프로젝트 폴더와 관리 기록도 준비해줘.')
+card('자체 서비스: RFP 없이 시작', '프로젝트이음으로 학원 상담·수강 신청 서비스를 시작해줘.\n자체 서비스 프로젝트이고 식별자는 academy-service야.\n대상은 소규모 학원이고 목표는 상담 누락과 신청 관리 시간 감소야.\n사업 가설, 사용자 문제, MVP 범위, 성공 지표와 실행 계획을 작성해줘.\n프로젝트 폴더와 관리 기록도 준비해줘.')
 body('기본 방법론은 하이브리드입니다. “2주 스프린트 중심으로 운영해줘”처럼 원하는 방식도 전달할 수 있습니다. 자체 서비스의 제안 단계는 사업 실행안과 내부·투자 발표로 조정합니다.')
 
 # 06 - Templates
@@ -318,6 +319,7 @@ links = [
 for label, url in links:
     story.append(p(f'<link href="{url}" color="#087F8C">{escape(label)}</link>', 'body'))
 sub('이 매뉴얼의 기준')
+body('역할 선택과 하위 에이전트 실행은 요청 범위에서 자동으로 진행합니다. 실제 실행 도구가 없는 환경은 직접 역할 수행과 제한을 구분해 안내합니다. AI 검토는 사람의 승인·수주·배포 허가를 대신하지 않습니다.')
 body(f'v{VERSION} 베타 기준입니다. SI·제품·API·유지보수 프로필과 릴리스 범위, 작업 재개, 관리 변경 복원, 전체 출력 검수와 로컬 현황을 제공합니다. 실제 업무 결정·내용·디자인은 근거를 확인해야 합니다. 공개 배포와 설치본의 버전은 별도로 확인합니다.')
 story.append(p(f'갱신일 {MANUAL_DATE}  |  안내 링크는 클릭할 수 있습니다.', 'small'))
 
@@ -340,7 +342,7 @@ def page_header(c, doc):
 
 doc=SimpleDocTemplate(str(OUT), pagesize=A4, rightMargin=50, leftMargin=50, topMargin=68, bottomMargin=60,
                       title='프로젝트이음 사용자 매뉴얼', author='Project Ieum',
-                      subject='Codex·Claude Code 설치, 참고 템플릿, 제안 작성 및 프로젝트 관리')
+                      subject='프로젝트 스타트팩 에이전트: 설치, 자동 역할 실행, 템플릿과 제안 작성')
 doc.build(story, onFirstPage=page_header, onLaterPages=page_header)
 reader=PdfReader(OUT)
 text='\n'.join(page.extract_text() or '' for page in reader.pages)
