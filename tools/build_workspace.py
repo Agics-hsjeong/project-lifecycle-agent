@@ -92,7 +92,9 @@ def bundle(source=None, output=None):
     source = Path(source) if source else ROOT / "website/dist"
     output = Path(output) if output else ROOT / "tools/workspace_ui"
     source, output = source.resolve(), output.resolve()
-    if not output.is_relative_to(ROOT / "tools"):
+    # Resolve both sides: Windows TEMP can use a real 8.3 alias (RUNNER~1)
+    # while the resolved output uses the equivalent long directory name.
+    if not output.is_relative_to((ROOT / "tools").resolve()):
         raise ValueError("Bundle output must remain inside tools")
     entry_path = source / ENTRY
     if entry_path.is_file() and any((ROOT / name).stat().st_mtime_ns > entry_path.stat().st_mtime_ns

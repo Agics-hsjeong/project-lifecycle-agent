@@ -80,3 +80,66 @@ class WorkspaceAssetTests(unittest.TestCase):
             with patch.object(build_workspace, "ROOT", root):
                 with self.assertRaisesRegex(ValueError, "Missing or unsafe"):
                     build_workspace.bundle(source, root / "tools/ui")
+
+    def test_root_alias_is_canonicalized_before_output_confinement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "canonical-root"
+            source = root / "website/dist"
+            (source / "workspace").mkdir(parents=True)
+            (source / build_workspace.ENTRY).write_text("<html>alias fixture</html>", encoding="utf-8")
+            alias = base / "root-alias"
+            try:
+                alias.symlink_to(root, target_is_directory=True)
+            except OSError:
+                self.skipTest("Directory alias creation is unavailable; Windows 8.3 coverage is separate")
+            with patch.object(build_workspace, "ROOT", alias):
+                result = build_workspace.bundle(alias / "website/dist", alias / "tools/ui")
+                self.assertTrue(result["ready"])
+                self.assertEqual(result["files"], 1)
+                self.assertTrue(build_workspace.verify(alias / "tools/ui")["ready"])
+                with self.assertRaisesRegex(ValueError, "inside tools"):
+                    build_workspace.bundle(alias / "website/dist", alias / "tools-sibling/ui")
+                self.assertFalse((root / "tools-sibling/ui").exists())
+
+    @unittest.skipUnless(os.name == "nt", "Native Windows 8.3 TEMP aliases")
+    def test_native_short_temp_alias_resolves_to_the_same_tools_root(self):
+        import ctypes
+        from ctypes import wintypes
+        with tempfile.TemporaryDirectory(prefix="workspace-asset-long-name-") as temporary:
+            root = Path(temporary)
+            source = root / "website/dist"
+            (source / "workspace").mkdir(parents=True)
+            (source / build_workspace.ENTRY).write_text("<html>Windows short path fixture</html>", encoding="utf-8")
+            short_name = ctypes.WinDLL("kernel32", use_last_error=True).GetShortPathNameW
+            short_name.argtypes = (wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD)
+            short_name.restype = wintypes.DWORD
+            buffer = ctypes.create_unicode_buffer(32768)
+            count = short_name(str(root), buffer, len(buffer))
+            if not count:
+                self.skipTest("Filesystem does not provide an 8.3 alias")
+            self.assertLess(count, len(buffer))
+            alias = Path(buffer.value)
+            if str(alias).casefold() == str(alias.resolve()).casefold():
+                self.skipTest("Filesystem returned no distinct 8.3 TEMP alias")
+            self.assertEqual(alias.resolve(), root.resolve())
+            with patch.object(build_workspace, "ROOT", alias):
+                result = build_workspace.bundle(alias / "website/dist", alias / "tools/ui")
+                self.assertTrue(result["ready"])
+                self.assertEqual(result["files"], 1)
+                self.assertTrue(build_workspace.verify(alias / "tools/ui")["ready"])
+                with self.assertRaisesRegex(ValueError, "inside tools"):
+                    build_workspace.bundle(alias / "website/dist", alias / "tools-sibling/ui")
+                self.assertFalse((root / "tools-sibling/ui").exists())
+
+    def test_output_outside_canonical_tools_never_gets_created(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "website/dist"
+            (source / "workspace").mkdir(parents=True)
+            (source / build_workspace.ENTRY).write_text("<html>confined fixture</html>", encoding="utf-8")
+            with patch.object(build_workspace, "ROOT", root):
+                for output in (root / "tools-sibling/ui", root.parent / (root.name + "-outside/ui"), root / "tools/../outside/ui"):
+                    with self.subTest(output=output), self.assertRaisesRegex(ValueError, "inside tools"):
+                        build_workspace.bundle(source, output)
+                    self.assertFalse(output.exists())
