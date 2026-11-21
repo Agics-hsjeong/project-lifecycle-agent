@@ -52,6 +52,28 @@ def portable_python(runtime, root):
     return target / Path(sys.executable).name
 
 
+def _filesystem_rules(root, project, runtime, selected, *, platform=None):
+    platform = sys.platform if platform is None else platform
+    # Bubblewrap starts from an empty, default-denied filesystem. Redundant
+    # nested deny mounts below its read-only ancestor masks can fail during
+    # setup. Expose only the copy and public runtime there; keep explicit
+    # home/project denies on the native Windows and macOS backends.
+    filesystem = {':root': 'deny', ':minimal': 'read',
+                  root.as_posix(): 'write', runtime.as_posix(): 'read'}
+    if not platform.startswith('linux'):
+        filesystem[Path.home().as_posix()] = 'deny'
+        filesystem[project.as_posix()] = 'deny'
+    if platform == 'win32':
+        filesystem[Path(os.environ.get('SystemRoot', 'C:/Windows')).as_posix()] = 'read'
+    else:
+        for readable in (Path(sys.base_prefix).resolve(), Path(sys.executable).resolve().parent):
+            if platform.startswith('linux') and project.is_relative_to(readable):
+                raise SandboxUnavailable('원본 프로젝트가 검증 인터프리터의 읽기 범위 안에 있습니다. 분리된 검증 런타임을 준비하세요.')
+            filesystem[readable.as_posix()] = 'read'
+    filesystem[selected.as_posix()] = 'read'
+    return filesystem
+
+
 def prepare(argv, root, project, *, executable=None):
     """The returned command writes only its copy. There is deliberately no unsafe fallback."""
     from tools.host_providers import executable_argv
@@ -84,16 +106,7 @@ def prepare(argv, root, project, *, executable=None):
             'Path(sys.argv[1]).write_text("started",encoding="utf-8")\n'
             'raise SystemExit(subprocess.call(json.loads(sys.argv[2])))\n', encoding='utf-8')
         sandbox_args = [verifier_python, str(entrypoint), str(marker), json.dumps(args, ensure_ascii=False)]
-        # Deny host reads by default. Windows requires MXC; no legacy fallback.
-        filesystem = {':root': 'deny', ':minimal': 'read',
-                      Path.home().as_posix(): 'deny', project.as_posix(): 'deny', root.as_posix(): 'write', runtime.as_posix(): 'read'}
-        if os.name == 'nt':
-            filesystem[Path(os.environ.get('SystemRoot', 'C:/Windows')).as_posix()] = 'read'
-        if os.name != 'nt':
-            # Interpreter/tools may live in a user-owned virtual environment.
-            filesystem[Path(sys.base_prefix).as_posix()] = 'read'
-            filesystem[Path(sys.executable).resolve().parent.as_posix()] = 'read'
-        filesystem[selected.as_posix()] = 'read'
+        filesystem = _filesystem_rules(root, project, runtime, selected)
         profile = 'permissions.ieum-verification={filesystem={' + ','.join(
             json.dumps(k, ensure_ascii=False) + '=' + json.dumps(v) for k, v in filesystem.items()) + '},network={enabled=false}}'
         settings = ['-c', 'windows.sandbox="mxc"', '-c', 'windows.require_mxc=true'] if os.name == 'nt' else []

@@ -2,6 +2,9 @@
 import os
 import signal
 import subprocess
+import sys
+import time
+from pathlib import Path
 
 
 class ProcessTree:
@@ -86,6 +89,30 @@ class ProcessTree:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            if sys.platform.startswith("linux"):
+                # Delivery of SIGKILL is asynchronous. Wait for owned group members
+                # to exit, ignoring zombies that can no longer execute or hold files.
+                deadline = time.monotonic() + 3
+                while self._linux_group_active(process.pid):
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Owned process group did not stop")
+                    time.sleep(0.01)
+
+    @staticmethod
+    def _linux_group_active(group):
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                fields = (entry / "stat").read_text().rpartition(")")[2].split()
+                if len(fields) > 2 and int(fields[2]) == group and fields[0] not in {"Z", "X", "x"}:
+                    return True
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except (OSError, UnicodeError, ValueError):
+                # /proc entries belonging to unrelated users may be unreadable.
+                continue
+        return False
 
     def close(self):
         if self.job:

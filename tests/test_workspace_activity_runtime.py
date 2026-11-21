@@ -51,6 +51,13 @@ class NativeActivityTests(unittest.TestCase):
         parent=starter.ROOT/'.test-output';parent.mkdir(exist_ok=True)
         self.temporary=tempfile.TemporaryDirectory(prefix='observed-runtime-',dir=parent)
         self.addCleanup(self.temporary.cleanup);self.base=Path(self.temporary.name)
+        # Synthetic native fixtures exercise repair/publication without a host CLI.
+        # test_verification_sandbox independently exercises the real OS boundary.
+        from tools.verification_sandbox import safe_environment
+        fixture_sandbox = patch('tools.verification_sandbox.prepare',
+            side_effect=lambda argv, root, project, **kw: (argv, safe_environment(root), {'backend': 'synthetic-unit-fixture'}))
+        fixture_sandbox.start()
+        self.addCleanup(fixture_sandbox.stop)
         with contextlib.redirect_stdout(io.StringIO()):
             self.project=Path(starter.init_project(self.base/'projects','observed','Synthetic observed work','product',profile='api'))
         (self.project/'src').mkdir();(self.project/'src/policy.py').write_text('VALUE = 1\n',encoding='utf-8')

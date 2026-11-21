@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import sys
 from pathlib import Path, PureWindowsPath
 import tempfile
 import threading
@@ -187,6 +188,17 @@ def process_alive(pid):
             kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
+        if sys.platform.startswith("linux"):
+            try:
+                # kill(0) also succeeds for an exited child awaiting its reaper.
+                # comm can contain spaces and parentheses; fields follow its last ')'.
+                fields = Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()
+                if fields and fields[0] in {"Z", "X", "x"}:
+                    return False
+            except FileNotFoundError:
+                os.kill(pid, 0)  # Recheck disappearance; /proc itself may be unavailable.
+            except (OSError, UnicodeError):
+                pass  # Unknown/query-denied owners remain conservatively alive.
         return True
     except ProcessLookupError:
         return False

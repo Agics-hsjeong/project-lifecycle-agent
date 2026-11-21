@@ -71,3 +71,22 @@ class ProcessTreeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'synthetic callback'):
             self.process([sys.executable,'-c','import time;time.sleep(20)'],timeout=5,on_started=fail)
         self.assertFalse(process_alive(ids[0]))
+
+    @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux zombie owner regression')
+    def test_exited_unreaped_child_is_not_alive(self):
+        pid = os.fork()
+        if pid == 0:
+            os._exit(0)
+        try:
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                fields = Path(f'/proc/{pid}/stat').read_text().rpartition(')')[2].split()
+                if fields[0] == 'Z':
+                    break
+                time.sleep(.01)
+            else:
+                self.fail('Child did not reach zombie state')
+            self.assertFalse(process_alive(pid))
+            self.assertTrue(process_alive(os.getpid()))
+        finally:
+            os.waitpid(pid, 0)

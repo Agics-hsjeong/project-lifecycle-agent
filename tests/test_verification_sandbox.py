@@ -71,9 +71,16 @@ class VerificationSandboxTests(SandboxFixture, unittest.TestCase):
                 [sys.executable, "-m", "unittest"], self.copy, self.project)
         self.addCleanup(verification_sandbox.cleanup, info)
         profile = next(value for value in command if value.startswith("permissions.ieum-verification="))
-        for rule in [json.dumps(":root")+'="deny"', json.dumps(Path.home().as_posix(), ensure_ascii=False)+'="deny"',
-                     json.dumps(self.project.resolve().as_posix(), ensure_ascii=False)+'="deny"',
-                     json.dumps(self.copy.resolve().as_posix(), ensure_ascii=False)+'="write"']:
+        required = [json.dumps(":root")+'="deny"',
+                    json.dumps(self.copy.resolve().as_posix(), ensure_ascii=False)+'="write"']
+        private_rules = [json.dumps(path.as_posix(), ensure_ascii=False)+'="deny"'
+                         for path in (Path.home(), self.project.resolve())]
+        if not sys.platform.startswith('linux'):
+            required += private_rules
+        else:
+            for rule in private_rules:
+                self.assertNotIn(rule, profile, "Default-denied private paths must not add redundant bwrap mounts")
+        for rule in required:
             self.assertIn(rule, profile)
         self.assertIn("network={enabled=false}", profile)
         self.assertIn("--include-managed-config", command)
@@ -99,6 +106,23 @@ class VerificationSandboxTests(SandboxFixture, unittest.TestCase):
         self.assertEqual(json.loads(wrapped[3])[1:], ["-m", "unittest"])
         self.assertEqual(info["write_root"], str(self.copy.resolve()))
         self.assertEqual(Path(environment["TEMP"]), self.copy / verification_sandbox.INTERNAL / "tmp")
+
+    def test_linux_default_deny_has_no_nested_private_masks_or_host_write_grants(self):
+        runtime = self.base / 'trusted-runtime'
+        selected = Path(sys.executable).resolve()
+        rules = verification_sandbox._filesystem_rules(self.copy.resolve(), self.project.resolve(), runtime.resolve(), selected, platform='linux')
+        self.assertEqual(rules[':root'], 'deny')
+        self.assertEqual(rules[':minimal'], 'read')
+        self.assertNotIn(Path.home().as_posix(), rules)
+        self.assertNotIn(self.project.resolve().as_posix(), rules)
+        self.assertEqual([path for path, access in rules.items() if access == 'write'], [self.copy.resolve().as_posix()])
+        self.assertEqual(rules[runtime.resolve().as_posix()], 'read')
+        self.assertFalse(any(path == runtime.parent.as_posix() and access == 'write' for path, access in rules.items()))
+
+    def test_linux_private_project_inside_a_runtime_read_grant_fails_closed(self):
+        with patch.object(verification_sandbox.sys, 'base_prefix', str(self.project.parent)):
+            with self.assertRaises(verification_sandbox.SandboxUnavailable):
+                verification_sandbox._filesystem_rules(self.copy.resolve(), self.project.resolve(), self.base/'trusted-runtime', Path(sys.executable).resolve(), platform='linux')
 
     def test_environment_strips_credentials_interpreters_and_app_hints(self):
         injected = {"OPENAI_API_KEY": "synthetic-secret", "ANTHROPIC_API_KEY": "synthetic-secret",
@@ -208,12 +232,11 @@ class RealVerificationSandboxTests(SandboxFixture, unittest.TestCase):
             tests.mkdir()
             source = "import errno,socket,sys,unittest\nfrom pathlib import Path\nclass Boundaries(unittest.TestCase):\n"
             source += " def test_copy_write(self):\n  p=Path('inside.txt');p.write_text('inside');self.assertEqual(p.read_text(),'inside')\n"
-            source += " def test_original_read(self):\n  with self.assertRaises(PermissionError): Path("+repr(str(self.project/'synthetic.txt'))+").read_bytes()\n"
-            source += " def test_home_read(self):\n  with self.assertRaises(PermissionError): Path("+repr(str(home_file))+").read_bytes()\n"
-            source += " def test_outside_write(self):\n  with self.assertRaises(PermissionError): Path("+repr(str(self.base/'outside.txt'))+").write_text('outside')\n"
+            source += " def test_original_read(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(self.project/'synthetic.txt'))+").read_bytes()\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.ENOENT})\n"
+            source += " def test_home_read(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(home_file))+").read_bytes()\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.ENOENT})\n"
+            source += " def test_outside_write(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(self.base/'outside.txt'))+").write_text('outside')\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.EROFS,errno.ENOENT})\n"
             source += " def test_network(self):\n  with self.assertRaises(OSError) as denied: socket.create_connection(('127.0.0.1',9),timeout=.5)\n  self.assertNotIn(denied.exception.errno,{errno.ECONNREFUSED})\n"
-            if os.name == "nt":
-                source += " def test_runtime_readonly(self):\n  with self.assertRaises(PermissionError): Path(sys.executable).parent.joinpath('tamper.txt').write_text('tamper')\n"
+            source += " def test_runtime_readonly(self):\n  with self.assertRaises(OSError) as denied: Path(sys.executable).parent.joinpath('tamper.txt').write_text('tamper')\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.EROFS})\n"
             (tests/"test_boundaries.py").write_text(source, encoding="utf-8")
             code, info = self.execute([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
         self.assertEqual(code, 0, (self.base/"actual.stderr").read_text(encoding="utf-8"))
@@ -235,7 +258,7 @@ class RealVerificationSandboxTests(SandboxFixture, unittest.TestCase):
         self.assertFalse(result.get("published_paths"))
         self.assertFalse(Path(result["verification_sandbox"]["runtime_root"]).exists())
         log = (self.base/"job"/"verification-0.stderr").read_text(encoding="utf-8")
-        self.assertIn("PermissionError", log)
+        self.assertTrue(any(name in log for name in ("PermissionError", "FileNotFoundError", "Read-only file system")), log)
 
     def test_real_safe_registered_test_can_publish_after_verification(self):
         self.make_job()
