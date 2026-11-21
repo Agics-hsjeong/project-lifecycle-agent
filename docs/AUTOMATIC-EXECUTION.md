@@ -95,7 +95,7 @@ python -m tools.verification_runtime PROJECT --kind python --lockfile requiremen
 python -m tools.verification_runtime PROJECT --kind node --lockfile package-lock.json --packages APPROVED_NODE_MODULES --node NODE_EXECUTABLE --npm APPROVED_NPM_DIRECTORY
 ```
 
-결과의 `runtime_ref`를 작업의 `execution.runtime_ref`에 연결합니다. 원본·후보 lockfile SHA와 등록 환경의 전체 파일 해시가 일치해야 합니다. 환경이 없거나 달라졌으면 모델에게 코드를 계속 고치게 하지 않고 환경 오류로 끝냅니다. Python 검증은 호스트 site-packages를 상속하지 않습니다. npm은 등록된 `run`·`test`만 사용하며 설치·네트워크 다운로드를 허용하지 않습니다. 소스는 읽기 전용이므로 빌드 산출물·캐시는 검증 scratch에 쓰도록 명령을 준비합니다. 등록 환경은 OS·아키텍처·Python 버전에 종속됩니다. Windows의 네트워크 차단 격리에서는 asyncio가 내부 TCP 채널을 사용하는 ASGI TestClient 검증을 지원하지 않습니다. 승인 Python 런타임은 이를 빠르게 환경 오류로 종료하며 코드 수정 루프로 넘기지 않습니다. API 스키마·순수 로직은 격리 검증하고, ASGI 통합은 별도 신뢰 환경에서 실행하여 그 범위를 명시합니다. 실제 HTTP 테스트를 실행하지 않고 통과로 기록하지 않습니다.
+결과의 `runtime_ref`를 작업의 `execution.runtime_ref`에 연결합니다. 원본·후보 lockfile SHA와 등록 환경의 전체 파일 해시가 일치해야 합니다. 환경이 없거나 달라졌으면 모델에게 코드를 계속 고치게 하지 않고 환경 오류로 끝냅니다. Python 검증은 호스트 site-packages를 상속하지 않습니다. npm은 등록된 `run`·`test`만 사용하며 설치·네트워크 다운로드를 허용하지 않습니다. 소스는 읽기 전용이므로 빌드 산출물·캐시는 검증 scratch에 쓰도록 명령을 준비합니다. 등록 환경은 OS·아키텍처·Python 버전에 종속됩니다. Windows의 네트워크 차단 격리에서는 asyncio가 내부 TCP 채널을 사용하는 ASGI TestClient 검증을 지원하지 않습니다. 승인 Python 런타임은 이를 빠르게 환경 오류로 종료하며 코드 수정 루프로 넘기지 않습니다. API 스키마·순수 로직은 격리 검증하고, ASGI 통합은 별도 신뢰 환경에서 실행하여 그 범위를 명시합니다. 실제 HTTP 테스트를 실행하지 않고 통과로 기록하지 않습니다. Linux Codex 격리에서는 중첩 Node 작업의 캡처 파이프가 EPERM 또는 빈 출력을 만들 수 있습니다. 감독자의 파일 로그와 표준 입출력 상속을 사용하며, 캡처 파이프가 필요한 도구는 해당 환경에서 별도 호환성 검증이 필요합니다. 빈 로그나 종료 코드만으로 실제 검증 실행을 추정하지 않습니다. [관련 upstream 보고](https://github.com/openai/codex/issues/18473)를 참고하세요.
 
 ### 관제에서 확인할 것
 

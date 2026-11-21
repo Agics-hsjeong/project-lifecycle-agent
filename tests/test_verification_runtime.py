@@ -12,13 +12,16 @@ import unittest
 from tools import starter, verification_runtime as runtime
 
 
-def node_child_forwarder(check, *, diagnostics=False):
-    # On POSIX, stdout/stderr pipes flush asynchronously. Setting exitCode lets
-    # Node finish pending writes instead of process.exit() truncating evidence.
+def node_child_forwarder(check, *, diagnostics=False, inherit_stdio=False):
+    # Normal npm lifecycle commands inherit the supervisor's log descriptors.
+    # Avoid nested capture pipes inside the strict Linux sandbox. Keep captured
+    # output as a separate non-isolated fixture regression below.
+    options="{stdio:['ignore','inherit','inherit']}" if inherit_stdio else "{encoding:'utf8'}"
     before = ("require('fs').writeSync(2,'ieum:parent:start '+JSON.stringify({execPath:process.execPath,argv:process.argv,cwd:process.cwd()}).slice(0,2048)+'\\n');" if diagnostics else '')
-    after = ("require('fs').writeSync(2,'ieum:parent:child '+JSON.stringify({status:child.status,signal:child.signal,error:child.error?String(child.error):null,stdoutBytes:(child.stdout||'').length,stderrBytes:(child.stderr||'').length}).slice(0,2048)+'\\n');" if diagnostics else '')
-    return (before+"const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],{encoding:'utf8'});"+
-            after+"process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');process.exitCode=child.status===null?1:child.status;")
+    after = ("require('fs').writeSync(2,'ieum:parent:child '+JSON.stringify({status:child.status,signal:child.signal,error:child.error?String(child.error):null,stdio:"+json.dumps('inherit' if inherit_stdio else 'pipe')+",stdoutBytes:child.stdout?child.stdout.length:null,stderrBytes:child.stderr?child.stderr.length:null}).slice(0,2048)+'\\n');" if diagnostics else '')
+    forward = "" if inherit_stdio else "process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');"
+    return (before+"const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],"+options+");"+
+            after+forward+"if(child.error){require('fs').writeSync(2,String(child.error)+'\\n');}process.exitCode=child.error||child.status===null?1:child.status;")
 
 
 class RuntimeTests(unittest.TestCase):
@@ -104,11 +107,25 @@ class RuntimeTests(unittest.TestCase):
         # a failing child must retain both diagnostics and its nonzero status.
         size=256*1024
         check=f"process.stdout.write('o'.repeat({size}));process.stderr.write('e'.repeat({size}));process.exitCode=7;"
-        result=subprocess.run([shutil.which('node'),'-e',node_child_forwarder(check)],
-                              cwd=self.base,capture_output=True,timeout=15)
-        self.assertEqual(result.returncode,7)
-        self.assertEqual(result.stdout,b'o'*size)
-        self.assertEqual(result.stderr,b'e'*size)
+        for inherit_stdio in (False, True):
+            with self.subTest(inherit_stdio=inherit_stdio):
+                result=subprocess.run([shutil.which('node'),'-e',node_child_forwarder(check,inherit_stdio=inherit_stdio)],
+                                      cwd=self.base,capture_output=True,timeout=15)
+                self.assertEqual(result.returncode,7)
+                self.assertEqual(result.stdout,b'o'*size)
+                self.assertEqual(result.stderr,b'e'*size)
+
+    @unittest.skipUnless(shutil.which('node'), 'Node child error regression requires Node')
+    def test_node_fixture_rejects_spawn_error_even_with_zero_status(self):
+        # This explicit synthetic seam models the observed Linux result shape:
+        # status=0 together with spawnSync.error must never claim success.
+        setup="require('child_process').spawnSync=()=>({status:0,error:Error('synthetic spawn failure'),stdout:'',stderr:''});"
+        for inherit_stdio in (False, True):
+            with self.subTest(inherit_stdio=inherit_stdio):
+                result=subprocess.run([shutil.which('node'),'-e',setup+node_child_forwarder('0',inherit_stdio=inherit_stdio)],
+                                      cwd=self.base,capture_output=True,timeout=15)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn(b'synthetic spawn failure',result.stderr)
 
     @unittest.skipUnless(os.environ.get('IEUM_SANDBOX_CLI') and shutil.which('node'), 'Actual strict Node verifier requires IEUM_SANDBOX_CLI and Node')
     def test_node_child_resolves_approved_files_without_reading_volume_or_original(self):
@@ -122,7 +139,7 @@ class RuntimeTests(unittest.TestCase):
         check=("const fs=require('fs');const assert=require('assert/strict');fs.writeSync(2,'ieum:child:start\\n');"
                "assert.equal(require('./node_modules/fixture/index.cjs'),73);"
                "assert.throws(()=>fs.readFileSync("+json.dumps(str(private))+"));fs.writeFileSync(process.env.IEUM_VERIFICATION_SCRATCH+'/node-child-completed','child:73; original:denied');console.log('child:73; original:denied')")
-        script=node_child_forwarder(check, diagnostics=True)
+        script=node_child_forwarder(check, diagnostics=True, inherit_stdio=True)
         (npm/'bin/npm-cli.js').write_text(script,encoding='utf-8')
         approved=runtime.register(self.project,kind='node',lockfile='requirements.lock',packages=self.packages,node=Path(shutil.which('node')),npm=npm)
         plan=runtime.prepare(['npm','test'],self.copy,{'runtime_ref':approved['runtime_ref']},self.scratch,project=self.project)
