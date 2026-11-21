@@ -22,4 +22,4 @@ manifest 구조 검사와 로컬 도구 테스트는 실제 호스트 설치 시
 
 ## 문서 사이트
 
-웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.
+웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.3/website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.

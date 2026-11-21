@@ -78,8 +78,17 @@ class ProposalTests(unittest.TestCase):
         self.assertTrue(any("qualitative" in issue for issue in self.issues()))
 
     def test_pptx_slide_count_matches_plan(self):
-        with ZipFile(self.project / "exports/presentation.pptx", "a") as archive:
-            archive.writestr("ppt/slides/slide2.xml", "<slide/>")
+        path = self.project / "exports/presentation.pptx"
+        with ZipFile(path) as archive:
+            files = {name: archive.read(name) for name in archive.namelist()}
+        files["ppt/presentation.xml"] = files["ppt/presentation.xml"].replace(
+            b"</p:sldIdLst>", b'<p:sldId id="257" r:id="rId2"/></p:sldIdLst>')
+        files["ppt/_rels/presentation.xml.rels"] = files["ppt/_rels/presentation.xml.rels"].replace(
+            b"</Relationships>", b'<Relationship Id="rId2" Target="slides/slide2.xml"/></Relationships>')
+        files["ppt/slides/slide2.xml"] = b"<slide/>"
+        with ZipFile(path, "w") as archive:
+            for name, content in files.items():
+                archive.writestr(name, content)
         self.assertTrue(any("슬라이드 수" in issue for issue in self.issues()))
 
     def test_approved_exports_and_profile_changes_stale_review(self):

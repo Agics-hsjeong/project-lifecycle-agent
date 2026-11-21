@@ -1,0 +1,45 @@
+name: Website checks
+
+on:
+  workflow_call:
+    inputs:
+      upload_pages:
+        description: Upload the validated build for GitHub Pages deployment
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate release metadata and manual
+        run: python ../tools/check_release.py --site
+      - run: npm ci
+      - run: npm run check:workspace
+      - run: npm run check:workspace-state
+      - run: npm run build
+      - name: Verify shipped UI matches its sources
+        run: python ../tools/build_workspace.py --check
+      - run: npm run check:links
+      - run: npx playwright install --with-deps chromium
+      - run: npm run check:workspace-browser
+      - uses: actions/upload-pages-artifact@v3
+        if: inputs.upload_pages
+        with:
+          path: website/dist

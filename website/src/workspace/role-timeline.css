@@ -1,0 +1,219 @@
+.role-timeline {
+  padding-top: 23px;
+  margin-top: 24px;
+  border-top: 1px solid #dce3e8;
+  min-width: 0;
+  color: #233341;
+}
+.role-timeline-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.role-timeline-heading h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 680;
+  letter-spacing: -0.035em;
+}
+.role-timeline-heading > span,
+.role-timeline-note {
+  font-size: 12px;
+  color: #61717f;
+  line-height: 1.6;
+}
+.role-timeline-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #bccbd2 #f5f8f9;
+}
+.role-timeline-scroll:focus-visible {
+  outline: 2px solid #087f82;
+  outline-offset: 2px;
+}
+.role-timeline-grid {
+  min-width: 640px;
+  padding-right: 9px;
+}
+.role-timeline-axis,
+.role-timeline-lane {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+}
+.role-timeline-axis {
+  min-height: 34px;
+}
+.role-timeline-axis-label {
+  font-size: 12px;
+  color: #61717f;
+  padding: 3px 10px 8px 0;
+}
+.role-timeline-axis-times {
+  position: relative;
+  min-width: 0;
+}
+.role-timeline-axis-times > time {
+  position: absolute;
+  white-space: nowrap;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #596b79;
+  transform: translateX(-50%);
+  top: 3px;
+}
+.role-timeline-axis-times > time.is-first {
+  transform: none;
+}
+.role-timeline-axis-times > time.is-last {
+  transform: translateX(-100%);
+}
+.role-timeline-no-axis {
+  display: block;
+  font-size: 12px;
+  color: #647582;
+  padding-top: 3px;
+}
+.role-timeline-lanes {
+  position: relative;
+}
+.role-timeline-lane {
+  border-top: 1px solid #e5e9ed;
+}
+.role-timeline-role {
+  padding: 13px 10px 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: #fff;
+}
+.role-timeline-track {
+  position: relative;
+  min-width: 0;
+}
+.role-timeline-gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #edf0f3;
+  pointer-events: none;
+}
+.role-task-bar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 27px;
+  min-width: 12px;
+  padding: 4px 9px;
+  background: #edf0f3;
+  border: 1px solid #e3e8ed;
+  color: #435361;
+  border-radius: 4px;
+  text-align: left;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.2;
+  z-index: 1;
+}
+.role-task-bar > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.role-task-bar.state-running {
+  background: #daf2ec;
+  border-color: #bde4d9;
+  color: #135b52;
+}
+.role-task-bar.state-failed {
+  background: #fdf0ed;
+  border-color: #eac5bd;
+  color: #914338;
+}
+.role-task-bar.state-unconfirmed {
+  border-style: dashed;
+  background: #f6f8fa;
+  color: #596b79;
+}
+.role-task-bar:hover,
+.role-task-bar.is-selected {
+  border-color: #087f82;
+}
+.role-task-bar:focus-visible {
+  outline: 2px solid #087f82;
+  outline-offset: 2px;
+  z-index: 4;
+}
+.role-task-live {
+  flex: 0 0 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #087f82;
+}
+.role-timeline-unreported {
+  display: block;
+  padding: 13px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #677885;
+}
+.role-timeline-now {
+  position: absolute;
+  inset: 0 0 0 132px;
+  pointer-events: none;
+  z-index: 3;
+}
+.role-timeline-now > div {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid #0f9e94;
+}
+.role-timeline-now span {
+  position: absolute;
+  left: 0;
+  top: -23px;
+  transform: translateX(-50%);
+  background: #087f82;
+  border-radius: 3px;
+  padding: 3px 7px;
+  color: #fff;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.25;
+}
+.role-timeline-note {
+  margin: 10px 0 0;
+}
+.role-timeline-empty {
+  margin: 0;
+  font-size: 14px;
+  color: #61717f;
+  padding: 12px 0;
+}
+@media (max-width: 599px) {
+  .role-timeline {
+    margin-top: 21px;
+    padding-top: 18px;
+  }
+  .role-timeline-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .role-timeline-heading h2 {
+    font-size: 16px;
+  }
+}

@@ -39,7 +39,7 @@ const profiles = [
 const resources = [
   { title: '처음 사용하는 분을 위한 가이드', text: '설치하고, 업무 폴더를 열고, 첫 요청을 보내기까지.', action: '가이드 읽기', path: 'docs/start/' },
   { title: '고객 포털 프로젝트 예제', text: '가상 RFP와 요구사항·제안서·발표 구성의 텍스트 예시.', action: '예제 살펴보기', path: 'docs/examples/portal/' },
-  { title: '사용자 매뉴얼', text: '설치부터 제안 작성과 유지보수까지, 14페이지 한국어 PDF.', action: 'PDF 다운로드', path: 'downloads/project-ieum-user-guide.pdf', download: true },
+  { title: '사용자 매뉴얼', text: '설치부터 제안 작성과 유지보수까지, 16페이지 한국어 PDF.', action: 'PDF 다운로드', path: 'downloads/project-ieum-user-guide.pdf', download: true },
 ];
 ---
 <!doctype html>
@@ -65,7 +65,7 @@ const resources = [
         <nav class="desktop-nav" aria-label="주 메뉴">
           <a href="#architecture">아키텍처</a><a href="#workflow">사용 흐름</a>
           <a href="#target-system">목표 시스템</a><a href="#templates">템플릿 활용</a>
-          <a href={url('docs/start/')}>문서</a>
+          <a href={url('docs/start/')}>문서</a><a href={url('workspace/')}>관제 체험</a>
           <a href={repo} class="external-link">GitHub <span aria-hidden="true">↗</span></a>
         </nav>
         <a class="button button-small header-install" href="#install">설치하기 <span aria-hidden="true">↓</span></a>
@@ -73,7 +73,7 @@ const resources = [
           <summary aria-label="탐색 메뉴 열기"><span>메뉴</span><span class="menu-lines" aria-hidden="true"></span></summary>
           <nav aria-label="모바일 주 메뉴">
             <a href="#architecture">아키텍처</a><a href="#workflow">사용 흐름</a><a href="#target-system">목표 시스템</a><a href="#templates">템플릿 활용</a>
-            <a href={url('docs/start/')}>문서</a><a href={repo}>GitHub ↗</a><a href="#install">설치하기</a>
+            <a href={url('docs/start/')}>문서</a><a href={url('workspace/')}>관제 체험</a><a href={repo}>GitHub ↗</a><a href="#install">설치하기</a>
           </nav>
         </details>
       </div>

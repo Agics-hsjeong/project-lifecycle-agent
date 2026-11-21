@@ -1,7 +1,10 @@
 """Source preservation metadata and bounded, non-executing text extraction."""
 import hashlib
 import importlib.util
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import posixpath
+import re
+from urllib.parse import unquote, urlsplit
 from tools.document_safety import xml_bytes, pdf_reader
 from zipfile import ZipFile
 
@@ -15,6 +18,58 @@ def hash_file(path):
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             result.update(chunk)
     return result.hexdigest()
+
+
+def hwpx_section_paths(archive):
+    """Use package spine order; old section-only inputs get numeric ordering."""
+    members = archive.namelist()
+    package_name = "Contents/content.hpf"
+    if package_name in members:
+        info = archive.getinfo(package_name)
+        if info.file_size > MAX_XML_BYTES or members.count(package_name) != 1:
+            raise ValueError("HWPX 패키지 구조를 확인하세요.")
+        package = xml_bytes(archive.read(package_name))
+        local = lambda node: node.tag.rsplit("}", 1)[-1]
+        spine = next((node for node in package.iter() if local(node) == "spine"), None)
+        if spine is not None:
+            items = {}
+            for manifest in (n for n in package.iter() if local(n) == "manifest"):
+                for item in manifest:
+                    if local(item) != "item":
+                        continue
+                    identifier = item.attrib.get("id")
+                    if not identifier or identifier in items:
+                        raise ValueError("HWPX 본문 manifest ID가 없거나 중복됩니다.")
+                    items[identifier] = item.attrib.get("href", "")
+            result, seen_ids = [], set()
+            for reference in spine:
+                if local(reference) != "itemref":
+                    continue
+                identifier = reference.attrib.get("idref")
+                href = items.get(identifier, "")
+                if not identifier or identifier in seen_ids or not href or "\\" in href:
+                    raise ValueError("HWPX 본문 순서 연결이 없거나 중복됩니다.")
+                seen_ids.add(identifier)
+                parsed = urlsplit(href)
+                if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+                    raise ValueError("HWPX 본문 외부 참조를 허용하지 않습니다.")
+                decoded = unquote(parsed.path)
+                if "\\" in decoded:
+                    raise ValueError("HWPX 본문 경로가 잘못되었습니다.")
+                name = posixpath.normpath(posixpath.join("Contents", decoded))
+                if (not name.startswith("Contents/") or ".." in PurePosixPath(name).parts
+                        or not name.endswith(".xml") or name in result or members.count(name) != 1):
+                    raise ValueError("HWPX 본문 경로가 없거나 잘못되었습니다.")
+                result.append(name)
+            if not result:
+                raise ValueError("HWPX 본문 순서가 비어 있습니다.")
+            return result
+    # Legacy/synthetic section-only archives have no spine. Never sort 10 before 2.
+    sections = [(int(match[1]), name) for name in members
+                if (match := re.fullmatch(r"Contents/section(\d+)\.xml", name))]
+    if len({index for index, _ in sections}) != len(sections):
+        raise ValueError("HWPX 본문 구역이 중복됩니다.")
+    return [name for _, name in sorted(sections)]
 
 
 def extract_text(path, *, coverage=None):
@@ -32,7 +87,7 @@ def extract_text(path, *, coverage=None):
         return None, "needs_reader", "텍스트 인코딩을 판별하지 못했습니다."
     if extension in {".docx", ".hwpx"}:
         with ZipFile(path) as archive:
-            names = ["word/document.xml"] if extension == ".docx" else sorted(name for name in archive.namelist() if name.startswith("Contents/section") and name.endswith(".xml"))
+            names = ["word/document.xml"] if extension == ".docx" else hwpx_section_paths(archive)
             if not names or sum(archive.getinfo(name).file_size for name in names) > MAX_XML_BYTES:
                 return None, "needs_reader", "XML 본문 누락 또는 추출 크기 제한 초과"
             paragraphs = []
@@ -85,5 +140,7 @@ def make_record(source, identifier, relative, timestamp):
         "input_id": identifier, "original_name": source.name, "path": relative,
         "sha256": checksum, "size": source.stat().st_size, "imported_at": timestamp,
         "purpose": "baseline",
-        "extraction": {"status": status, "path": extracted_path, "note": reason, **coverage},
+        "extraction": {"status": status, "path": extracted_path,
+                       **({"sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()} if text is not None else {}),
+                       "note": reason, **coverage},
     }, text

@@ -155,6 +155,11 @@ def result(folder, payload, actor="agent"):
             return {"unchanged": True, "valid": valid_step(root, run, step), "status": step["status"]}
         require_revision(root, payload)
         status = payload["status"]
+        if status in {"running", "succeeded", "skipped"}:
+            # Individual artefact gates also apply to host/CLI result recording.
+            # Projects without workspace metadata retain their existing behavior.
+            from tools.workspace import assert_step_allowed
+            assert_step_allowed(root, run["id"], step["id"])
         dependencies = [s for s in run["steps"] if s["id"] in step["depends_on"]]
         if status in {"running", "succeeded"} and not all(valid_step(root, run, s) for s in dependencies):
             raise ValueError("선행 작업의 결과가 없거나 변경되었습니다.")

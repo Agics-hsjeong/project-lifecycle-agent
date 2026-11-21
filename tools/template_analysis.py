@@ -5,6 +5,7 @@ import posixpath
 import re
 from tools.document_safety import xml_bytes
 from zipfile import ZipFile
+from urllib.parse import unquote, urlsplit
 
 from tools.intake import MAX_SOURCE_BYTES, MAX_XML_BYTES
 
@@ -18,6 +19,8 @@ def attrs(node):
 
 
 def xml(archive, name):
+    if archive.namelist().count(name) != 1:
+        raise ValueError("문서 XML 파트가 없거나 중복됩니다.")
     info = archive.getinfo(name)
     if info.file_size > MAX_XML_BYTES:
         raise ValueError("템플릿 XML 크기 제한 초과")
@@ -48,19 +51,45 @@ def observations(roots):
 
 
 def slide_paths(archive, root):
+    """Resolve the active presentation list, excluding orphan ZIP parts."""
     relations = xml(archive, "ppt/_rels/presentation.xml.rels")
-    links = {item.attrib.get("Id"): item.attrib.get("Target") for item in relations if item.attrib.get("TargetMode") != "External"}
-    result = []
-    for item in root.iter():
+    links = {}
+    for relation in relations:
+        if tag(relation) != "Relationship":
+            continue
+        identifier = relation.attrib.get("Id")
+        if not identifier or identifier in links:
+            raise ValueError("발표자료 관계 ID가 없거나 중복됩니다.")
+        links[identifier] = relation.attrib
+    members = archive.namelist()
+    lists = [item for item in root if tag(item) == "sldIdLst"]
+    if len(lists) > 1:
+        raise ValueError("발표자료 슬라이드 목록이 중복됩니다.")
+    result, seen_ids, seen_relations = [], set(), set()
+    for item in lists[0] if lists else []:
         if tag(item) != "sldId":
             continue
         relation_id = next((value for key, value in item.attrib.items() if key.endswith("}id")), None)
-        target = links.get(relation_id)
-        if not target:
-            raise ValueError("발표자료 슬라이드 연결 누락")
+        slide_id = item.attrib.get("id")
+        relation = links.get(relation_id)
+        if (not relation or relation_id in seen_relations or not slide_id or slide_id in seen_ids
+                or relation.get("TargetMode") == "External"):
+            raise ValueError("발표자료 슬라이드 연결이 없거나 중복됩니다.")
+        seen_ids.add(slide_id)
+        seen_relations.add(relation_id)
+        if relation.get("Type") and not relation["Type"].endswith("/slide"):
+            raise ValueError("발표자료 슬라이드 관계 형식이 잘못되었습니다.")
+        target = relation.get("Target", "")
+        parsed = urlsplit(target)
+        if parsed.scheme or parsed.netloc or parsed.query or parsed.fragment:
+            raise ValueError("발표자료 슬라이드 외부 참조를 허용하지 않습니다.")
+        target = unquote(parsed.path)
+        if not target or "\\" in target:
+            raise ValueError("발표자료 슬라이드 경로가 잘못되었습니다.")
         name = posixpath.normpath("ppt/" + target) if not target.startswith("/") else target.lstrip("/")
-        if ".." in PurePosixPath(name).parts or not name.startswith("ppt/slides/"):
-            raise ValueError("잘못된 슬라이드 경로")
+        if (".." in PurePosixPath(name).parts or not name.startswith("ppt/slides/")
+                or not name.endswith(".xml") or name in result or members.count(name) != 1):
+            raise ValueError("발표자료 슬라이드 경로가 없거나 잘못되었습니다.")
         result.append(name)
     return result
 

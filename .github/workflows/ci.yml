@@ -2,7 +2,9 @@ name: Test and package
 
 on:
   push:
+    branches: ['**']
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -14,6 +16,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python: ['3.10', '3.12']
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,3 +38,29 @@ jobs:
         with:
           name: plugin-${{ matrix.os }}-python-${{ matrix.python }}
           path: dist/project-lifecycle-agent-v*.zip
+
+  sandbox-boundary:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install local verification CLI (no model authentication)
+        run: npm install --global @openai/codex@0.170.0
+      - name: Linux sandbox dependency
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Resolve explicit sandbox CLI
+        run: python -c "import os,shutil; p=shutil.which('codex'); assert p; open(os.environ['GITHUB_ENV'],'a').write('IEUM_SANDBOX_CLI='+p+'\n')"
+      - name: Real OS boundary and process lifetime regressions
+        run: python -m unittest discover -s tests -p test_verification_sandbox.py -v
+        env:
+          PYTHONUTF8: '1'

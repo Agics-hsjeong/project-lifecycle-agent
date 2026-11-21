@@ -14,7 +14,8 @@ from pypdf import PdfReader
 
 ROOT = Path(__file__).resolve().parents[2]
 VERSION = json.loads((ROOT / 'plugin.json').read_text(encoding='utf-8'))['version']
-MANUAL_DATE = '2026.11.19'
+MANUAL_DATE = '2026.11.21'
+PAGE_COUNT = 16
 OUT = ROOT / f'output/pdf/프로젝트이음-사용자매뉴얼-{VERSION}.pdf'
 (ROOT / 'tmp/pdfs').mkdir(parents=True, exist_ok=True)
 OUT.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +126,7 @@ toc = [
     ('참고 템플릿 넣기', 6), ('스타일 분석과 선택', 7), ('제안 패키지 제작', 8),
     ('검수·승인·제출', 9), ('수주 후 프로젝트 관리', 10), ('개발·배포·유지보수 요청', 11),
     ('이어하기와 파일 위치', 12), ('업데이트·문제 해결', 13), ('요청문 요약·참고 링크', 14),
+    ('관제에서 실제 진행 확인', 15), ('자동 실행·검증·복구', 16),
 ]
 toc_rows = []
 for i in range(0, len(toc), 2):
@@ -293,8 +295,8 @@ table(['상황', '에이전트에게 요청할 내용'], [
     ['단계 이동 불가', '미완료 산출물·검토·변경된 승인 근거를 확인하고 필요한 작업 수행.'],
 ], [.25, .75])
 sub('자료와 실행 범위')
-body('고객 프로젝트와 참고 원본은 플러그인과 분리합니다. 기존 프로젝트를 새 기본형으로 통째로 덮어쓰지 않습니다. 이 플러그인은 활성 세션에서 실행되며 상시 서버·자동 스케줄러를 포함하지 않습니다.')
-body('원본 분석 규칙은 프로젝트 파일에 저장합니다. 모델을 학습시키는 기능은 없으며, 자료가 호스트 모델에 전달되는 방식은 사용하는 제품의 데이터 정책과 설정을 따릅니다. 오류 해결을 위해 고객 폴더나 캐시를 임의로 삭제하지 마세요.')
+body('고객 자료와 참고 원본은 플러그인과 분리합니다. 기존 문서·ID·단계를 덮어쓰지 않습니다. 구형 프로젝트의 추출문 해시가 없으면 에이전트가 원본과 내용을 대조하고 input-review로 연결합니다.')
+body('기본은 현재 AI 세션입니다. 별도 CLI 실행기를 연결하면 PC와 실행기가 켜진 동안 준비된 작업을 처리합니다. 관제는 실제 보고만 표시합니다. 오류 해결을 위해 고객 폴더·캐시를 임의로 삭제하지 마세요.')
 
 # 14 - Desk reference
 chapter(13, '바로 쓰는 요청문과 참고 링크', 'DESK REFERENCE / 13')
@@ -312,6 +314,7 @@ links = [
     ('설치·업데이트 상세 안내', REPO + '/blob/main/docs/INSTALL.md'),
     ('템플릿 등록·스타일 분석 안내', REPO + '/blob/main/docs/REFERENCE-TEMPLATES.md'),
     ('제안 패키지 상세 안내', REPO + '/blob/main/docs/PROPOSAL.md'),
+    ('관제 사용법·자동 실행 범위', REPO + '/blob/main/docs/WORKSPACE.md'),
     ('엔진 운영·기존 프로젝트 적용', REPO + '/blob/main/docs/ENGINE.md'),
     ('OpenAI 공식 플러그인 문서', 'https://developers.openai.com/plugins/build/plugins'),
     ('Claude Code 공식 설치 문서', 'https://code.claude.com/docs/en/discover-plugins'),
@@ -323,13 +326,43 @@ body('역할 선택과 하위 에이전트 실행은 요청 범위에서 자동�
 body(f'v{VERSION} 베타 기준입니다. SI·제품·API·유지보수 프로필과 릴리스 범위, 작업 재개, 관리 변경 복원, 전체 출력 검수와 로컬 현황을 제공합니다. 실제 업무 결정·내용·디자인은 근거를 확인해야 합니다. 공개 배포와 설치본의 버전은 별도로 확인합니다.')
 story.append(p(f'갱신일 {MANUAL_DATE}  |  안내 링크는 클릭할 수 있습니다.', 'small'))
 
+
+# 15 - Observer
+chapter(14, '관제에서 실제 진행 확인하기', 'OBSERVE REAL WORK / 14')
+body('현재 Codex·Claude Code 대화에서 작업을 요청하고 관제에서는 역할별 진행·대기·완료와 실제 행동을 확인합니다. 내부 작업마다 승인 버튼이나 별도 수정 양식을 입력할 필요가 없습니다.')
+card('한 번의 요청으로 실행과 관제 연결', '이음으로 문의 기능을 구현해줘.\n필요한 역할끼리 검토하고 수정해서 테스트까지 마쳐줘.\n현재 프로젝트의 실제 역할별 진행 상황과 로그를 관제에서 보여줘.')
+table(['화면', '무엇을 확인하나요?'], [
+    ['실행 현황', '작업 상태·담당 역할·실제 행동·검증 결과와 완료 비율'],
+    ['워크플로우', '사업과 요구사항 → 제안과 발표 → 설계와 구현 → 검증과 배포 → 인수와 운영의 선후 관계'],
+    ['작업 지도', '원본 요구사항에서 작업·실제 산출물·실행자로 이어지는 연결'],
+    ['타임라인', '예정 일정과 실제 실행을 구분한 일·주·월 보기, 역할별 실행 구간'],
+    ['작업 상세', '최근 로그·파일·Diff·의존성과 실제 보고된 사용량'],
+], [.23, .77])
+sub('연결 상태도 구분해서 확인하세요')
+body('“데이터 연결됨”은 프로젝트 기록을 받고 있다는 뜻입니다. 실제 실행기 연결은 별도 표시합니다. 원장을 기록하는 동안에는 마지막 정상 화면과 수신 시각을 유지하고 다음 조회로 복구합니다. 오래된 응답으로 완료 상태를 되돌리지 않습니다.')
+body('휴대폰에서는 메뉴와 작업 목록으로 시작하고, 항목을 선택해 전체 화면 상세를 봅니다. 기록이 없는 시간·비용·다른 대화 내용을 임의로 채우지 않습니다.')
+
+# 16 - Safe execution
+chapter(15, '자동 실행·검증·복구 이해하기', 'RUN, VERIFY & RESUME / 15')
+body('필요한 역할은 요청과 현재 산출물에 맞춰 선택합니다. AI의 내부 검토 통과와 사람의 사업 결정·외부 제출·운영 배포 권한은 구분합니다.')
+table(['연결 방식', '실제 수행 범위'], [
+    ['현재 AI 호스트', '호스트가 역할 작업자를 실행하고 조율자가 실제 활동과 결과를 관제에 보고합니다. 연결하지 않은 다른 채팅을 자동 수집하지 않습니다.'],
+    ['별도 네이티브 CLI', '로그인된 Codex·Claude Code 실행기가 준비된 작업을 의존 순서로 처리합니다. PC·실행기가 동작해야 하며 앱 대화창에 메시지를 넣는 방식은 아닙니다.'],
+], [.25, .75])
+body('별도 실행기의 독립 검증에는 <b>로컬 Codex sandbox CLI</b>가 필요합니다. Claude 실행기에서도 같은 검증 도구를 사용하며 모델 API를 호출하지 않습니다. Windows는 <b>MXC 지원</b>이 필요합니다. 환경 준비와 연결은 에이전트가 확인합니다.')
+card('환경 확인과 안전한 재개 요청', '이 프로젝트의 관제와 자동 실행 환경을 확인해줘.\n실패·중단 이유와 원본 변경을 확인하고, 허용된 범위에서 복구해줘.\n이미 완료한 작업은 중복 실행하지 말고 다음 작업을 이어서 처리해줘.')
+sub('실패를 숨기거나 검증을 건너뛰지 않습니다')
+body('검증은 작업 사본에서 OS 격리로 수행합니다. 원본·사용자 홈 읽기, 사본 밖 쓰기와 네트워크를 제한합니다. 지원하지 않는 격리·인증·권한 오류나 원본 충돌은 이유를 표시하고 안전하게 멈춥니다. 비격리 테스트로 대신하지 않습니다.')
+body('준비 오류와 중단 이력을 보존하고 실제 소유자 종료를 확인해 복구합니다. 같은 실패를 무한 반복하거나 실패한 모델 작업을 임의로 중복 실행하지 않습니다.')
+story.append(p('beta.3 검증: 실제 Codex·Claude의 백엔드→QA 연속 완료와 새 사본 재검증을 확인했습니다. 이 결과는 18개 역할 전체·모든 템플릿·운영 배포의 품질 보증은 아닙니다. 자료 처리에는 사용하는 호스트의 데이터 정책이 적용됩니다.', 'small'))
+
 def page_header(c, doc):
     c.setStrokeColor(LINE)
     c.line(50, 40, W-50, 40)
     c.setFont('Malgun', 8)
     c.setFillColor(MUTED)
     c.drawString(50, 27, f'PROJECT IEUM  |  v{VERSION}')
-    c.drawRightString(W-50, 27, f'{doc.page:02d} / 14')
+    c.drawRightString(W-50, 27, f'{doc.page:02d} / {PAGE_COUNT}')
     if doc.page == 1:
         c.setFillColor(TEAL)
         c.rect(0, H-18, W, 18, fill=1, stroke=0)
@@ -348,7 +381,7 @@ reader=PdfReader(OUT)
 text='\n'.join(page.extract_text() or '' for page in reader.pages)
 for token in ['사용자 매뉴얼', 'codex plugin marketplace add', '/plugin install', 'qualitative/', '유지보수', 'HANDOFF.md']:
     assert token in text, f'Missing text: {token}'
-assert len(reader.pages)==14, f'Expected 14 pages, got {len(reader.pages)}'
+assert len(reader.pages)==PAGE_COUNT, f'Expected {PAGE_COUNT} pages, got {len(reader.pages)}'
 report={'version':VERSION, 'file':str(OUT), 'pages':len(reader.pages), 'bytes':OUT.stat().st_size,
         'page_text_lengths':[len(page.extract_text() or '') for page in reader.pages]}
 (ROOT/'tmp/pdfs/validation.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')

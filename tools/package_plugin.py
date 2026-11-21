@@ -16,7 +16,8 @@ FILES = ("plugin.json", "README.md", "CHANGELOG.md", "AGENTS.md", ".gitignore", 
 
 
 def package(output=None):
-    from tools import role_agents
+    from tools import role_agents, build_workspace
+    build_workspace.verify(ROOT / "tools/workspace_ui")
     if not role_agents.build(check=True)["ready"]:
         raise ValueError("역할 정의가 원천 계약과 다릅니다. role_agents.py build로 재생성하세요.")
     metadata = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))

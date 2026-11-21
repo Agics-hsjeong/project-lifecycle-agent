@@ -12,8 +12,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  website-checks:
+    uses: ./.github/workflows/website-checks.yml
+
   publish:
+    needs: [checks, website-checks]
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:
@@ -21,10 +29,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Test
-        run: python -m unittest discover -s tests -v
-        env:
-          PYTHONUTF8: '1'
       - name: Validate release and build assets
         env:
           RELEASE_TAG: ${{ github.ref_name }}

@@ -100,10 +100,11 @@ def check_export(path, role, slide_count=None):
                 if archive.testzip() is not None:
                     raise ValueError("제출 파일 압축 데이터가 손상되었습니다.")
                 if suffix == ".pptx" and slide_count is not None:
-                    actual = sum(bool(re.fullmatch(r"ppt/slides/slide\d+\.xml", name)) for name in names)
+                    from tools.template_analysis import slide_paths, xml
+                    actual = len(slide_paths(archive, xml(archive, "ppt/presentation.xml")))
                     if actual != slide_count:
                         raise ValueError("발표 PPTX 슬라이드 수와 관리 목록이 다릅니다.")
-        except BadZipFile as exc:
+        except (BadZipFile, KeyError) as exc:
             raise ValueError("제출 파일이 올바른 문서 패키지가 아닙니다.") from exc
 
 

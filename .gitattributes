@@ -11,3 +11,7 @@
 *.mjs text eol=lf
 *.ts text eol=lf
 *.astro text eol=lf
+
+*.tsx text eol=lf
+# Prebuilt workbench bytes are covered by the shipped SHA-256 manifest.
+tools/workspace_ui/** -text -diff

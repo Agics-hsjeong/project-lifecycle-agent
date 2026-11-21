@@ -15,3 +15,6 @@ website/.npm-cache/
 website/.preview/
 output/
 tmp/
+
+# Private native execution copies and logs, outside each customer project.
+.ieum-runtime/

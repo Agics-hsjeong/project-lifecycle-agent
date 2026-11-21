@@ -1,13 +1,15 @@
 """Confined, serialized project writes with rollback and crash recovery."""
 import base64
+import errno
 from contextlib import contextmanager
 import hashlib
 import json
 import os
 import stat
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import tempfile
 import threading
+import time
 from functools import wraps
 
 _OWNED = threading.local()
@@ -35,6 +37,23 @@ def json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def _containment_path(path):
+    """Compare equivalent resolved Windows DOS/UNC names without changing I/O.
+
+    Windows realpath may retain its extended prefix if a file is atomically
+    replaced between final-name queries. Both results still name the same file.
+    Only documented DOS-drive and UNC forms are normalized, never device paths.
+    """
+    if isinstance(path, PureWindowsPath):
+        value = str(path)
+        if value[:8].casefold() == "\\\\?\\unc\\":
+            value = "\\\\" + value[8:]
+        elif value.startswith("\\\\?\\") and len(value) >= 7 and value[4].isalpha() and value[5:7] == ":\\":
+            value = value[4:]
+        return PureWindowsPath(value)
+    return path
+
+
 def confined(root, relative):
     root = Path(root).resolve()
     if not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative:
@@ -43,7 +62,7 @@ def confined(root, relative):
     if rel.is_absolute() or ".." in rel.parts:
         raise ValueError("프로젝트 외부 경로는 허용하지 않습니다.")
     path = root / rel
-    if not path.resolve().is_relative_to(root):
+    if not _containment_path(path.resolve()).is_relative_to(_containment_path(root)):
         raise ValueError("경로가 프로젝트 밖을 가리킵니다.")
     # Do not mutate through links, including links back into the same project.
     current = path
@@ -77,7 +96,21 @@ def lock(root, *, recovering=False):
     state.mkdir(exist_ok=True)
     path = confined(root, "state/write.lock")
     try:
-        fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        # Windows may report EACCES while a prior lock deletion is pending.
+        # Wait only on this exact managed lock; never delete it or relax ACLs.
+        # A persistent access denial remains the original permission failure.
+        deadline = time.monotonic() + 0.25
+        while True:
+            try:
+                fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+                break
+            except PermissionError as exc:
+                winerror = getattr(exc, "winerror", None)
+                transient_code = winerror in {5, 32} or (winerror is None and exc.errno == errno.EACCES)
+                exact_lock = exc.filename is not None and Path(exc.filename).absolute() == path.absolute()
+                if os.name != "nt" or not transient_code or not exact_lock or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
     except FileExistsError as exc:
         raise ValueError("다른 쓰기 작업의 잠금이 있습니다. 종료 여부를 확인한 뒤 recover를 사용하세요.") from exc
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -140,11 +173,18 @@ def process_alive(pid):
         kernel.OpenProcess.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
         kernel.OpenProcess.restype = wintypes.HANDLE
         kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel.GetExitCodeProcess.argtypes = (wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD))
+        kernel.GetExitCodeProcess.restype = wintypes.BOOL
         handle = kernel.OpenProcess(0x1000, False, pid)
         if not handle:
             return ctypes.get_last_error() != 87
-        kernel.CloseHandle(handle)
-        return True
+        try:
+            status = wintypes.DWORD()
+            if not kernel.GetExitCodeProcess(handle, ctypes.byref(status)):
+                return True  # A process we cannot query is conservatively alive.
+            return status.value == 259  # STILL_ACTIVE; an exited handle may remain open.
+        finally:
+            kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
         return True

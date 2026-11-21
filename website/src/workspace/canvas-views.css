@@ -1,0 +1,352 @@
+/* Canvas views share the light workbench surface rather than library chrome. */
+.theme-light .workflow-scene .workflow-canvas {
+  min-height: 0;
+  height: auto;
+  flex: 1;
+  background: #f8fafb;
+}
+.theme-light .workflow-scene .react-flow__node-task {
+  width: 248px;
+}
+.theme-light .workflow-scene .flow-card {
+  width: 248px;
+  height: 144px;
+  min-height: 144px;
+  padding: 13px 15px 11px;
+  background: #fff;
+  border: 1px solid #d5dfe5;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px #233c4905;
+  display: flex;
+  flex-direction: column;
+  color: #293f4c;
+}
+.theme-light .workflow-scene .flow-card.is-selected {
+  border-color: #16827c;
+  box-shadow: 0 0 0 2px #16827c14;
+}
+.theme-light .workflow-scene .flow-card.task-running,
+.theme-light .workflow-scene .flow-card.task-doing {
+  border-left: 3px solid #288d80;
+  background: #fff;
+}
+.theme-light .workflow-scene .flow-card.task-done,
+.theme-light .workflow-scene .flow-card.task-succeeded {
+  border-left: 1px solid #d5dfe5;
+}
+.theme-light .workflow-scene .flow-card.task-awaiting_approval,
+.theme-light .workflow-scene .flow-card.task-awaiting_decision {
+  background: #fff;
+  border-color: #d5c5a8;
+}
+.theme-light .workflow-scene .flow-card.task-failed,
+.theme-light .workflow-scene .flow-card.task-blocked {
+  background: #fff;
+  border-color: #d3b9a0;
+}
+.theme-light .workflow-scene .flow-card-top {
+  margin: 0 0 8px;
+}
+.theme-light .workflow-scene .flow-card-top > .mono {
+  color: #5c717f;
+  font-size: 11px;
+}
+.theme-light .workflow-scene .flow-card > strong {
+  font-size: 15px;
+  line-height: 1.45;
+  font-weight: 620;
+  min-height: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.theme-light .workflow-scene .flow-card-role {
+  font-size: 12px;
+  color: #607681;
+  margin-top: auto;
+  gap: 6px;
+  min-height: 18px;
+}
+.theme-light .workflow-scene .flow-card footer {
+  padding-top: 9px;
+  margin-top: 8px;
+  border-top: 1px solid #edf1f3;
+  font-size: 11px;
+  color: #667d88;
+}
+.flow-status {
+  color: #60737f;
+  font-size: 12px;
+  font-weight: 500;
+}
+.flow-status.status-text-running,
+.flow-status.status-text-doing {
+  color: #14766b;
+}
+.flow-status.status-text-failed,
+.flow-status.status-text-blocked {
+  color: #8a5f31;
+}
+.flow-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #bcc9cf;
+}
+.flow-state-dot.state-running,
+.flow-state-dot.state-doing {
+  background: #278d7c;
+}
+.flow-state-dot.state-failed,
+.flow-state-dot.state-blocked {
+  background: #b98a55;
+}
+.theme-light .workflow-scene .canvas-phase-node {
+  width: 248px;
+  padding: 0 0 11px;
+  border-bottom: 1px solid #dce5ea;
+  color: #405865;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.theme-light .workflow-scene .canvas-phase-node > span {
+  color: #7c909b;
+  font:
+    12px/1.5 Consolas,
+    monospace;
+}
+.theme-light .workflow-scene .canvas-phase-node > strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.theme-light .workflow-scene .canvas-phase-node > small {
+  margin-left: auto;
+  color: #657d89;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.theme-light .workflow-scene .react-flow__handle {
+  width: 5px;
+  height: 5px;
+  min-width: 5px;
+  min-height: 5px;
+  border: 1px solid #fff;
+  background: #b8c8d0;
+}
+.theme-light .workflow-scene .react-flow__minimap {
+  width: 124px;
+  height: 78px;
+  border: 1px solid #d9e4e9;
+  background: #fff;
+  border-radius: 4px;
+  bottom: 13px;
+  right: 13px;
+}
+.theme-light .workflow-scene .react-flow__background {
+  opacity: 0.65;
+}
+.theme-light .workflow-scene .scene-line {
+  display: inline-block;
+  width: 22px;
+  height: 0;
+  border-top: 1px solid #9bafb9;
+  margin-right: 7px;
+  vertical-align: middle;
+}
+.theme-light .workflow-scene .scene-line.is-feedback {
+  border-top-style: dashed;
+  border-color: #a17c4b;
+}
+.theme-light .scene-switch {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid #e0e7eb;
+  border-radius: 5px;
+  background: #f6f8f9;
+}
+.theme-light .scene-switch button {
+  border: 0;
+  background: transparent;
+  color: #5c727f;
+  min-height: 30px;
+  padding: 5px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+.theme-light .scene-switch button.active {
+  color: #076f6b;
+  background: #fff;
+  box-shadow: 0 1px 3px #29455210;
+}
+.theme-light .map-scene-options {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  padding: 9px 16px;
+  min-height: 47px;
+  border-bottom: 1px solid #e6ecef;
+  background: #fff;
+  font-size: 12px;
+  color: #526875;
+}
+.theme-light .map-scene-options label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  min-height: 28px;
+}
+.theme-light .map-scene-options input {
+  margin: 0;
+  width: 14px;
+  height: 14px;
+  accent-color: #16827c;
+}
+.theme-light .map-scene-options > span {
+  margin-left: auto;
+  color: #5c717f;
+  font-size: 12px;
+}
+.theme-light .map-scene-content {
+  position: relative;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.theme-light .map-scene .knowledge-canvas {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  position: relative;
+  background: #f8fafb;
+}
+.theme-light .map-scene .knowledge-3d {
+  flex: 1;
+  height: 100%;
+  width: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.theme-light .map-scene .graph-accessible {
+  position: static;
+  background: #fff;
+  border: 0;
+  border-top: 1px solid #e5ebee;
+  padding: 0 16px;
+  max-width: none;
+  width: 100%;
+  min-height: 35px;
+  color: #536c79;
+  font-size: 12px;
+  z-index: auto;
+}
+.theme-light .map-scene .graph-accessible summary {
+  padding: 10px 0;
+  cursor: pointer;
+}
+.theme-light .map-scene .graph-accessible summary > span {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #5c717f;
+}
+.theme-light .map-scene .graph-accessible > div {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-height: 126px;
+  overflow: auto;
+  padding: 0 0 12px;
+}
+.theme-light .map-scene .graph-accessible button {
+  font-size: 12px;
+  padding: 6px 8px;
+  background: #f6f9fa;
+  color: #465f6c;
+  border: 1px solid #dce5ea;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+  max-width: 100%;
+  text-align: left;
+}
+.map-node-key {
+  width: 12px;
+  height: 9px;
+  border: 1px solid #bdccd4;
+  border-radius: 2px;
+  background: #fff;
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.map-node-key.kind-requirement {
+  background: #f1f4f8;
+}
+.map-node-key.kind-artefact {
+  background: #edf3f6;
+}
+.map-node-key.kind-agent {
+  background: #eaf5f1;
+  border-color: #bad5cb;
+}
+.theme-light .map-scene .graph-legend {
+  position: static;
+}
+@media (max-width: 799px) {
+  .theme-light .workflow-scene .react-flow__minimap {
+    width: 98px;
+    height: 60px;
+  }
+  .theme-light .map-scene-options {
+    padding: 8px 12px;
+    gap: 8px 12px;
+  }
+  .theme-light .map-scene-options > span {
+    width: 100%;
+    margin-left: 0;
+  }
+  .theme-light .scene-switch button {
+    min-height: 40px;
+  }
+  .theme-light .map-scene-options label {
+    min-height: 40px;
+  }
+  .theme-light .map-scene .graph-accessible {
+    padding: 0 12px;
+  }
+}
+
+.theme-light .scene-panel .scene-controls > button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px 9px;
+  background: #fff;
+  color: #526875;
+  border: 1px solid #dce5ea;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.theme-light .scene-panel .scene-controls > button:hover {
+  background: #f1f6f6;
+}
+@media (max-width: 799px) {
+  .theme-light .scene-panel .scene-controls > button {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+.theme-light .workflow-scene .react-flow__minimap {
+  overflow: hidden;
+}
+.theme-light .workflow-scene .react-flow__minimap svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}

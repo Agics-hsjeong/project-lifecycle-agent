@@ -1,6 +1,6 @@
 # 검증 기록
 
-기능·환경별 실제 검증과 대상 버전을 구분해 기록합니다. 최신 개발 작업본은 v2.0.0-beta.1이며 공개 안정판·기존 설치본과 구분합니다.
+기능·환경별 실제 검증과 대상 버전을 구분해 기록합니다. 공개 beta.2의 호스트 검증은 [HOST-VALIDATION](HOST-VALIDATION.md), 최신 미배포 관제·자동 실행 안정화 검증은 [WORKSPACE-OBSERVATION-VALIDATION](WORKSPACE-OBSERVATION-VALIDATION.md)에 기록합니다. 아래 과거 버전 검증 기록은 당시 범위를 유지합니다.
 
 ## 2026-11-03 폴더 이동 분석·v2.0.0-beta.1
 

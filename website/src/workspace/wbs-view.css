@@ -1,0 +1,466 @@
+.wbs-scene {
+  --wbs-left: 380px;
+  --wbs-row: 56px;
+  --wbs-phase: 38px;
+}
+.wbs-scene .scene-meta {
+  flex-wrap: wrap;
+}
+.wbs-scene .scene-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+.wbs-scale {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #dce4e9;
+  border-radius: 5px;
+  background: #f5f8fa;
+}
+.wbs-scale button {
+  min-width: 38px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border-radius: 3px;
+  background: transparent;
+  color: #526875;
+  font-size: 13px;
+}
+.wbs-scale button[aria-pressed="true"] {
+  background: #fff;
+  color: #087f82;
+  box-shadow: 0 1px 3px #1e364612;
+}
+.wbs-sheet-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #bbc9d0 #f8fafb;
+  min-width: 0;
+}
+.wbs-sheet {
+  width: calc(var(--wbs-left) + var(--wbs-chart));
+  min-width: 100%;
+  position: relative;
+  background: #fff;
+}
+.wbs-sheet-head,
+.wbs-sheet-row {
+  display: grid;
+  grid-template-columns: var(--wbs-left) minmax(var(--wbs-chart), 1fr);
+}
+.wbs-sheet-head {
+  height: 53px;
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  border-bottom: 1px solid #dfe6eb;
+  background: #f8fafb;
+}
+.wbs-sheet-left {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px;
+  align-items: center;
+  gap: 6px;
+  border-right: 1px solid #e1e7ec;
+  padding: 0 14px 0 17px;
+  min-width: 0;
+  background: #fff;
+}
+.wbs-sheet-head > .wbs-sheet-left {
+  z-index: 8;
+  background: #f8fafb;
+  color: #526875;
+  font-size: 12px;
+  font-weight: 500;
+}
+.wbs-sheet-head > .wbs-sheet-left > span:last-child {
+  text-align: left;
+}
+.wbs-axis {
+  position: relative;
+  height: 52px;
+  background: #f8fafb;
+}
+.wbs-axis-cell {
+  position: absolute;
+  inset-block: 0;
+  border-left: 1px solid #e8edf0;
+  padding: 9px 10px 5px;
+  color: #344b5a;
+}
+.wbs-axis-cell > span {
+  display: block;
+  font-size: 12px;
+  font-weight: 550;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.wbs-axis-cell > small {
+  display: block;
+  font-size: 11px;
+  color: #617480;
+  margin-top: 3px;
+}
+.wbs-today-label {
+  position: absolute;
+  top: 0;
+  padding: 3px 5px;
+  background: #087f82;
+  color: #fff;
+  border-radius: 0 0 3px 3px;
+  font-size: 10px;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  z-index: 2;
+}
+.wbs-sheet-body {
+  position: relative;
+}
+.wbs-chart-grid {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--wbs-left);
+  width: var(--wbs-chart);
+  pointer-events: none;
+  z-index: 0;
+}
+.wbs-chart-grid > i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #eef2f4;
+}
+.wbs-chart-grid > i.wbs-current-date {
+  background: #21969255;
+  width: 1px;
+}
+.wbs-sheet-row {
+  min-height: var(--wbs-row);
+  height: var(--wbs-row);
+  border-bottom: 1px solid #e8edf0;
+  position: relative;
+}
+.wbs-sheet-row.is-phase {
+  height: var(--wbs-phase);
+  min-height: var(--wbs-phase);
+  background: #f7f9fa;
+}
+.wbs-sheet-row.is-phase > .wbs-sheet-left {
+  background: #f7f9fa;
+}
+.wbs-sheet-row.is-selected > .wbs-sheet-left {
+  background: #eaf5f2;
+  box-shadow: inset 3px 0 #087f82;
+}
+.wbs-sheet-row.is-selected > .wbs-chart-row {
+  background: #087f8206;
+}
+.wbs-task-label {
+  min-height: 54px;
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 0;
+  text-align: left;
+  background: transparent;
+  color: #2c4453;
+}
+.wbs-task-label > strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 550;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  width: 100%;
+}
+.wbs-task-label > small {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: #526875;
+}
+.wbs-task-label > small > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wbs-task-label .mono {
+  font-size: 11px;
+  color: #657986;
+  flex-shrink: 0;
+}
+.wbs-state-label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #526875;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wbs-state-label > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #95a5af;
+  flex-shrink: 0;
+}
+.wbs-state-label.is-done {
+  color: #26735a;
+}
+.wbs-state-label.is-done > i {
+  background: #238a68;
+}
+.wbs-state-label.is-working {
+  color: #087f82;
+}
+.wbs-state-label.is-working > i {
+  background: #087f82;
+}
+.wbs-state-label.is-failed {
+  color: #974f36;
+}
+.wbs-state-label.is-failed > i {
+  background: #ad694b;
+}
+.wbs-phase-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 37px;
+  grid-column: 1/-1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  color: #405b6b;
+}
+.wbs-phase-label > span {
+  display: flex;
+  color: #657b87;
+}
+.wbs-phase-label > span.is-open {
+  transform: rotate(90deg);
+}
+.wbs-phase-label > strong {
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wbs-phase-label > small {
+  color: #617783;
+  font-size: 11px;
+}
+.wbs-chart-row {
+  position: relative;
+  min-width: 0;
+}
+.wbs-phase-range {
+  position: absolute;
+  top: 18px;
+  height: 2px;
+  background: #93a8b33d;
+  border-left: 1px solid #8ba0ad;
+  border-right: 1px solid #8ba0ad;
+}
+.wbs-plan-bar {
+  position: absolute;
+  top: 11px;
+  height: 20px;
+  min-width: 4px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #c8d4dc;
+  background: #e9eff3;
+  color: #4b6474;
+  border-radius: 3px;
+  text-align: left;
+  overflow: hidden;
+}
+.wbs-plan-bar > span {
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.wbs-plan-bar.has-issue {
+  background: #f6eee5;
+  border-color: #d9c7b5;
+  color: #875834;
+}
+.wbs-plan-bar:hover {
+  border-color: #087f82;
+}
+.wbs-actual-bar {
+  position: absolute;
+  top: 33px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  z-index: 2;
+}
+.wbs-actual-bar > i {
+  display: block;
+  margin-left: 8px;
+  height: 3px;
+  min-width: 3px;
+  background: #087f82;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #087f8209;
+}
+.wbs-actual-bar.is-failed > i {
+  background: #ac684a;
+}
+.wbs-actual-bar.is-unconfirmed > i {
+  background: #8ba0ab;
+}
+.wbs-actual-bar:hover > i {
+  height: 5px;
+}
+.wbs-plan-missing {
+  display: block;
+  position: absolute;
+  left: 16px;
+  top: 12px;
+  color: #687b87;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.wbs-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.wbs-key > .is-plan {
+  width: 18px;
+  height: 8px;
+  border: 1px solid #bbcbd5;
+  background: #e9eff3;
+  border-radius: 2px;
+}
+.wbs-key > .is-actual {
+  width: 18px;
+  height: 3px;
+  background: #087f82;
+  border-radius: 2px;
+}
+.wbs-scene-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 15px;
+}
+.wbs-footer-note {
+  margin-left: auto;
+}
+.wbs-no-records {
+  padding: 24px;
+  color: #617784;
+  font-size: 14px;
+}
+.wbs-sheet-scroll:focus-visible {
+  outline: 2px solid #087f82;
+  outline-offset: -3px;
+}
+@media (max-width: 1199px) {
+  .wbs-scene {
+    --wbs-left: 340px;
+  }
+  .wbs-footer-note {
+    display: none;
+  }
+}
+@media (max-width: 799px) {
+  .wbs-scene {
+    --wbs-left: 240px;
+  }
+  .wbs-scale button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .wbs-scene .scene-toolbar {
+    align-items: flex-start;
+  }
+  .wbs-scene .scene-controls {
+    margin-left: 0;
+    flex-wrap: wrap;
+  }
+  .wbs-sheet-left {
+    grid-template-columns: minmax(0, 1fr) 62px;
+    padding-left: 10px;
+    padding-right: 8px;
+  }
+  .wbs-task-label > strong {
+    font-size: 13px;
+  }
+  .wbs-task-label > small {
+    gap: 5px;
+    font-size: 11px;
+  }
+  .wbs-task-label .mono {
+    display: none;
+  }
+  .wbs-state-label {
+    font-size: 11px;
+    gap: 4px;
+  }
+  .wbs-sheet-head > .wbs-sheet-left {
+    font-size: 11px;
+  }
+  .wbs-scene-footer {
+    gap: 10px 14px;
+  }
+}
+
+@media (max-width: 799px) {
+  .wbs-scene {
+    --wbs-phase: 44px;
+  }
+  .wbs-phase-label {
+    min-height: 43px;
+  }
+}
+
+/* Match B's task-table reading sizes; only supporting IDs/dates stay compact. */
+.wbs-state-label {
+  font-size: 14px;
+}
+.wbs-phase-label > strong {
+  font-size: 13px;
+}
+@media (max-width: 799px) {
+  .wbs-sheet-left {
+    grid-template-columns: minmax(0, 1fr) 78px;
+  }
+  .wbs-task-label > strong {
+    font-size: 14px;
+  }
+  .wbs-task-label > small,
+  .wbs-state-label {
+    font-size: 12px;
+  }
+  .wbs-sheet-head > .wbs-sheet-left {
+    font-size: 12px;
+  }
+}

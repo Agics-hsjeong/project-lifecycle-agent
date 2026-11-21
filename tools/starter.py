@@ -144,7 +144,7 @@ def init_project(parent, slug, name, business_type, rfp=None, profile=None):
             record, extracted = make_record(copied, "INPUT-001", copied.relative_to(target).as_posix(), now())
             (target / "inputs/manifest.json").write_text(json.dumps({"schema_version": 1, "inputs": [record]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             if extracted is not None:
-                (target / record["extraction"]["path"]).write_text(extracted, encoding="utf-8")
+                (target / record["extraction"]["path"]).write_bytes(extracted.encode("utf-8"))
         marker.unlink()
     except BaseException:
         # Only remove the new directory owned by this invocation; never an existing project.
@@ -337,6 +337,10 @@ def print_context(folder):
 
 
 def main(argv=None):
+    # Host tools decode JSON as UTF-8, including on Korean Windows code pages.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     from tools import lifecycle
     parser = argparse.ArgumentParser(description="사업·프로젝트 에이전트 스타터팩 관리")
     commands = parser.add_subparsers(dest="command", required=True)

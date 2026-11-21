@@ -13,17 +13,32 @@ def gate_issues(root):
         if record.get("purpose") == "operating_note":
             continue
         extraction = record.get("extraction", {})
+        identifier = record.get("input_id", "Unknown input")
+        try:
+            if hash_file(confined(root, record["path"])) != record["sha256"]:
+                raise ValueError("등록 원본 해시 불일치")
+        except (KeyError, ValueError, OSError):
+            result.append(f"{identifier}: 등록 원본 변경·누락, 원본을 확인하고 새 입력으로 등록하세요.")
+            continue
+        if extraction.get("path"):
+            try:
+                if not extraction.get("sha256"):
+                    result.append(f"{identifier}: 이전 추출문의 등록 해시가 없습니다. 실제 판독 후 input-review로 확인하세요.")
+                elif hash_file(confined(root, extraction["path"])) != extraction["sha256"]:
+                    raise ValueError("등록 추출문 해시 불일치")
+            except (ValueError, OSError):
+                result.append(f"{identifier}: 등록 추출문 변경·누락, 원본 기준 재추출·재판독이 필요합니다.")
         status = extraction.get("status")
         if status == "reviewed":
             try:
                 proof = confined(root, extraction["review_ref"])
-                if hash_file(proof) != extraction["review_sha256"] or hash_file(confined(root, record["path"])) != record["sha256"]:
+                if hash_file(proof) != extraction["review_sha256"]:
                     raise ValueError("판독 근거 변경")
             except (KeyError, ValueError, OSError):
-                result.append(f"{record['input_id']}: 판독 근거·원본 변경, 재확인 필요")
+                result.append(f"{identifier}: 판독 근거 변경·누락, 재확인 필요")
         elif status != "extracted":
             pending = [p["page"] for p in extraction.get("pages", []) if p["status"] != "extracted"]
-            result.append(f"{record['input_id']}: 원문 판독 미완료 ({status}, 페이지 {pending}); 실제 판독 후 input-review")
+            result.append(f"{identifier}: 원문 판독 미완료 ({status}, 페이지 {pending}); 실제 판독 후 input-review")
     return result
 
 
@@ -49,6 +64,11 @@ def review(folder, payload, actor="agent"):
         extraction = record["extraction"]
         if extraction.get("page_count") is not None and count != extraction["page_count"]:
             raise ValueError("원문 페이지 수와 판독 목록이 다릅니다.")
+        extracted_sha = None
+        if extraction.get("path"):
+            extracted_sha = hash_file(starter.local_file(root, extraction["path"]))
+            if extraction.get("sha256") and extracted_sha != extraction["sha256"]:
+                raise ValueError("등록 추출문이 변경되었습니다. 원본 기준으로 재추출·재판독하세요.")
         proof = starter.local_file(root, payload["evidence_ref"])
         if proof.suffix.lower() not in {".md", ".txt", ".json"} or not proof.read_text(encoding="utf-8-sig").strip():
             raise ValueError("실제 판독 결과 텍스트가 필요합니다.")
@@ -57,6 +77,13 @@ def review(folder, payload, actor="agent"):
         extraction.update(raw_status=extraction.get("raw_status", extraction["status"]), status="reviewed",
                           review_ref=payload["evidence_ref"], review_sha256=hash_file(proof), reviewed_by=actor,
                           page_count=count, reviewed_pages=pages)
+        if extracted_sha is not None:
+            # Older records get a digest only after an explicit real reader receipt.
+            extraction["sha256"] = extracted_sha
+            if hash_file(starter.local_file(root, extraction["path"])) != extracted_sha:
+                raise ValueError("판독 중 추출문이 변경되었습니다.")
+        if hash_file(confined(root, record["path"])) != record["sha256"]:
+            raise ValueError("판독 중 원본이 변경되었습니다.")
         changes = {"inputs/manifest.json": json_bytes(data)}
         revision = lifecycle.add_event(root, changes, "input-review", actor, {"input_id": record["input_id"], "pages": pages})
         commit(root, changes)

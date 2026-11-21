@@ -1,0 +1,10 @@
+---
+import Workspace from '../../workspace/Workspace';
+import '../../workspace/workspace.css';
+import '../../workspace/responsive.css';
+import '../../workspace/light.css';
+import '../../workspace/scene.css';
+import release from '../../../../plugin.json';
+const base=import.meta.env.BASE_URL.replace(/\/$/,'');
+---
+<!doctype html><html lang="ko"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><meta name="description" content="프로젝트이음 관제 워크스페이스 — 역할별 AI의 실제 행동, 진행 중·대기 중·완료 작업과 진척도를 한눈에 확인합니다."/><meta name="color-scheme" content="light"/><meta name="robots" content="noindex"/><title>관제 워크스페이스 · 프로젝트이음</title><link rel="icon" href={`${base}/brand/symbol.png`}/><style define:vars={{fontUrl:`${base}/fonts/PretendardVariable.woff2`}}></style></head><body><Workspace client:only="react" base={base} version={release.version}/><noscript>관제 워크스페이스를 사용하려면 JavaScript가 필요합니다. 원본 프로젝트 데이터는 프로젝트 폴더의 원장에서 확인할 수 있습니다.</noscript></body></html>

@@ -1,11 +1,19 @@
 {
   "name": "project-lifecycle-marketplace",
-  "interface": {"displayName": "Project Lifecycle Agent"},
+  "interface": {
+    "displayName": "프로젝트이음 · Project Ieum"
+  },
   "plugins": [
     {
       "name": "project-lifecycle-agent",
-      "source": {"source": "local", "path": "./"},
-      "policy": {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
       "category": "Productivity"
     }
   ]
