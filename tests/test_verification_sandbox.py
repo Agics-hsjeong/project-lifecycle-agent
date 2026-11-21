@@ -124,6 +124,48 @@ class VerificationSandboxTests(SandboxFixture, unittest.TestCase):
             with self.assertRaises(verification_sandbox.SandboxUnavailable):
                 verification_sandbox._filesystem_rules(self.copy.resolve(), self.project.resolve(), self.base/'trusted-runtime', Path(sys.executable).resolve(), platform='linux')
 
+    def test_linux_broker_resolves_nested_npm_binary_without_directory_grants(self):
+        package = self.base / 'node_modules/@openai/codex'
+        entry = package / 'bin/codex.js'
+        entry.parent.mkdir(parents=True);entry.write_text('// synthetic entry')
+        native = package / 'node_modules/@openai/codex-linux-x64'
+        native.mkdir(parents=True);(native/'package.json').write_text('{}')
+        binary = native / 'vendor/x86_64-unknown-linux-musl/bin/codex'
+        binary.parent.mkdir(parents=True);binary.write_text('synthetic binary')
+        self.assertEqual(verification_sandbox._linux_sandbox_executable(['node',str(entry)],machine='x86_64'),binary.resolve())
+        with patch.object(host_providers, 'executable_argv', return_value=['node',str(entry)]), \
+                patch.object(verification_sandbox.sys, 'platform', 'linux'), \
+                patch.object(verification_sandbox.platform, 'machine', return_value='x86_64'), \
+                patch.object(verification_sandbox, 'portable_python', side_effect=lambda runtime,root: runtime/'python'):
+            command, _, info = verification_sandbox.prepare([sys.executable,'-m','unittest'],self.copy,self.project)
+        self.addCleanup(verification_sandbox.cleanup,info)
+        profile = next(arg for arg in command if arg.startswith('permissions.ieum-verification='))
+        self.assertIn(json.dumps(binary.resolve().as_posix(), ensure_ascii=False)+'="read"',profile)
+        self.assertNotIn(json.dumps(native.as_posix(), ensure_ascii=False)+'=',profile)
+        self.assertNotIn(json.dumps(self.base.as_posix(), ensure_ascii=False)+'=',profile)
+
+    def test_linux_broker_resolves_hoisted_or_bundled_arm_package(self):
+        package = self.base / 'node_modules/@openai/codex'
+        entry = package / 'bin/codex.js'
+        entry.parent.mkdir(parents=True);entry.write_text('// synthetic entry')
+        native = self.base / 'node_modules/@openai/codex-linux-arm64'
+        native.mkdir(parents=True);(native/'package.json').write_text('{}')
+        binary = native / 'vendor/aarch64-unknown-linux-musl/bin/codex'
+        binary.parent.mkdir(parents=True);binary.write_text('synthetic binary')
+        self.assertEqual(verification_sandbox._linux_sandbox_executable(['node',str(entry)],machine='aarch64'),binary.resolve())
+        (native/'package.json').unlink()
+        bundled = package / 'vendor/aarch64-unknown-linux-musl/bin/codex'
+        bundled.parent.mkdir(parents=True);bundled.write_text('synthetic bundled binary')
+        self.assertEqual(verification_sandbox._linux_sandbox_executable(['node',str(entry)],machine='arm64'),bundled.resolve())
+
+    def test_linux_broker_native_file_and_missing_package_fail_closed(self):
+        binary = self.base / 'codex'
+        binary.write_text('synthetic native binary')
+        self.assertEqual(verification_sandbox._linux_sandbox_executable([str(binary)]),binary.resolve())
+        entry = self.base/'missing/bin/codex.js'
+        with self.assertRaises(verification_sandbox.SandboxUnavailable):
+            verification_sandbox._linux_sandbox_executable(['node',str(entry)],machine='x86_64')
+
     def test_environment_strips_credentials_interpreters_and_app_hints(self):
         injected = {"OPENAI_API_KEY": "synthetic-secret", "ANTHROPIC_API_KEY": "synthetic-secret",
                     "AWS_SECRET_ACCESS_KEY": "synthetic-secret", "GH_TOKEN": "synthetic-secret",

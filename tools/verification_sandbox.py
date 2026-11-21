@@ -1,6 +1,7 @@
 """Fail-closed OS-isolated verification. Codex sandbox is a local tool, not a model call."""
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import sys
@@ -50,6 +51,32 @@ def portable_python(runtime, root):
                     archive.write(file, file.relative_to(library).as_posix())
     (target / ('python' + version + '._pth')).write_text('python' + version + '.zip\nDLLs\n' + str(root) + '\n', encoding='utf-8')
     return target / Path(sys.executable).name
+
+
+def _linux_sandbox_executable(launcher, *, machine=None):
+    """Resolve only Codex's re-exec file, never a whole home/package directory."""
+    entry = Path(launcher[-1]).resolve()
+    if entry.suffix.lower() not in {'.js', '.mjs'}:
+        return Path(shutil.which(launcher[0]) or launcher[0]).resolve()
+    architecture = (platform.machine() if machine is None else machine).lower()
+    target = {'x86_64': ('x64', 'x86_64'), 'amd64': ('x64', 'x86_64'),
+              'aarch64': ('arm64', 'aarch64'), 'arm64': ('arm64', 'aarch64')}.get(architecture)
+    if not target:
+        raise SandboxUnavailable('지원하는 Linux Codex 검증 실행 파일을 찾지 못했습니다.')
+    package_arch, triple_arch = target
+    executable = Path('vendor') / (triple_arch + '-unknown-linux-musl') / 'bin' / 'codex'
+    # Mirrors bin/codex.js: Node package resolution, then the bundled vendor fallback.
+    for ancestor in entry.parents:
+        package = ancestor / 'node_modules' / '@openai' / ('codex-linux-' + package_arch)
+        if (package / 'package.json').is_file():
+            binary = (package / executable).resolve()
+            if binary.is_file():
+                return binary
+            raise SandboxUnavailable('Linux Codex 플랫폼 패키지의 실행 파일이 없습니다.')
+    binary = (entry.parent.parent / executable).resolve()
+    if binary.is_file():
+        return binary
+    raise SandboxUnavailable('Linux Codex 플랫폼 패키지의 실행 파일을 찾지 못했습니다.')
 
 
 def _filesystem_rules(root, project, runtime, selected, *, platform=None):
@@ -107,6 +134,11 @@ def prepare(argv, root, project, *, executable=None):
             'raise SystemExit(subprocess.call(json.loads(sys.argv[2])))\n', encoding='utf-8')
         sandbox_args = [verifier_python, str(entrypoint), str(marker), json.dumps(args, ensure_ascii=False)]
         filesystem = _filesystem_rules(root, project, runtime, selected)
+        if sys.platform.startswith('linux'):
+            broker = _linux_sandbox_executable(launcher)
+            if broker.is_relative_to(project):
+                raise SandboxUnavailable('격리 실행기는 원본 프로젝트 밖에 설치해야 합니다.')
+            filesystem[broker.as_posix()] = 'read'
         profile = 'permissions.ieum-verification={filesystem={' + ','.join(
             json.dumps(k, ensure_ascii=False) + '=' + json.dumps(v) for k, v in filesystem.items()) + '},network={enabled=false}}'
         settings = ['-c', 'windows.sandbox="mxc"', '-c', 'windows.require_mxc=true'] if os.name == 'nt' else []
