@@ -12,6 +12,13 @@ import unittest
 from tools import starter, verification_runtime as runtime
 
 
+def node_child_forwarder(check):
+    # On POSIX, stdout/stderr pipes flush asynchronously. Setting exitCode lets
+    # Node finish pending writes instead of process.exit() truncating evidence.
+    return ("const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],{encoding:'utf8'});"
+            "process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');process.exitCode=child.status===null?1:child.status;")
+
+
 class RuntimeTests(unittest.TestCase):
     def setUp(self):
         base=starter.ROOT/'.test-output';base.mkdir(exist_ok=True)
@@ -89,6 +96,18 @@ class RuntimeTests(unittest.TestCase):
             with self.subTest(argv=argv),self.assertRaises(runtime.RuntimeUnavailable):
                 runtime.preflight({'verification_commands':[argv]},self.project)
 
+    @unittest.skipUnless(shutil.which('node'), 'Node child output forwarding requires Node')
+    def test_node_fixture_preserves_output_and_nonzero_exit(self):
+        # Large pipe output makes premature parent exit observable on POSIX;
+        # a failing child must retain both diagnostics and its nonzero status.
+        size=256*1024
+        check=f"process.stdout.write('o'.repeat({size}));process.stderr.write('e'.repeat({size}));process.exitCode=7;"
+        result=subprocess.run([shutil.which('node'),'-e',node_child_forwarder(check)],
+                              cwd=self.base,capture_output=True,timeout=15)
+        self.assertEqual(result.returncode,7)
+        self.assertEqual(result.stdout,b'o'*size)
+        self.assertEqual(result.stderr,b'e'*size)
+
     @unittest.skipUnless(os.environ.get('IEUM_SANDBOX_CLI') and shutil.which('node'), 'Actual strict Node verifier requires IEUM_SANDBOX_CLI and Node')
     def test_node_child_resolves_approved_files_without_reading_volume_or_original(self):
         # A tiny trusted npm-shaped launcher isolates Node/child resolution;
@@ -101,8 +120,7 @@ class RuntimeTests(unittest.TestCase):
         check=("const fs=require('fs');const assert=require('assert/strict');"
                "assert.equal(require('./node_modules/fixture/index.cjs'),73);"
                "assert.throws(()=>fs.readFileSync("+json.dumps(str(private))+"));console.log('child:73; original:denied')")
-        script=("const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],{encoding:'utf8'});"
-                "process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');process.exit(child.status===null?1:child.status);")
+        script=node_child_forwarder(check)
         (npm/'bin/npm-cli.js').write_text(script,encoding='utf-8')
         approved=runtime.register(self.project,kind='node',lockfile='requirements.lock',packages=self.packages,node=Path(shutil.which('node')),npm=npm)
         plan=runtime.prepare(['npm','test'],self.copy,{'runtime_ref':approved['runtime_ref']},self.scratch,project=self.project)
