@@ -3,11 +3,11 @@ title: 변경 이력
 description: 프로젝트이음의 브랜드·문서 사이트와 플러그인 기능 변경을 확인합니다.
 ---
 
-## 2.0.0-beta.3 — 관제와 자동 실행 안정화
+## 2.0.0-beta.4 — 관제와 자동 실행 안정화
 
 역할별 실제 활동·워크플로우·작업 지도·타임라인을 제공하고, OS 격리 검증과 실행 복구·입력 무결성·관제 갱신을 강화했습니다. 실제 Codex·Claude 백엔드→QA 자동 실행을 검증했습니다. Windows 독립 검증은 MXC가 필요합니다.
 
-[beta.3 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.3)
+[beta.4 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.4)
 
 ## 2.0.0-beta.2 — 자동 역할 실행
 

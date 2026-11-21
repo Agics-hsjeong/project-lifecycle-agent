@@ -15,6 +15,7 @@ import threading
 import time
 import traceback
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -189,6 +190,63 @@ class ExecutorIntegrationTests(unittest.TestCase):
         self.runners.append((stop, thread, errors))
         thread.start()
         return stop, thread, errors
+
+    def test_task_blocker_writer_contention_retries_without_stopping_executor(self):
+        from tools.storage import lock
+        requested, locked, release = threading.Event(), threading.Event(), threading.Event()
+        contentions, attempts, holder_errors = [], [], []
+        original = workspace_runner._task_blockers
+        def holder():
+            if not requested.wait(5):
+                return
+            try:
+                def holding():
+                    with lock(self.root):
+                        locked.set()
+                        release.wait(3)
+                workspace_runner._retry(holding)
+            except Exception as error:
+                holder_errors.append(error)
+        def checking(root, tasks, identifier):
+            attempts.append(identifier)
+            if len(attempts) == 1:
+                requested.set()
+                self.assertTrue(locked.wait(3), 'Synthetic writer did not acquire its lock')
+                try:
+                    return original(root, tasks, identifier)
+                except ValueError as error:
+                    if workspace_runner._contention(error):
+                        contentions.append(error)
+                    raise
+                finally:
+                    release.set()
+            return original(root, tasks, identifier)
+        writer = threading.Thread(target=holder)
+        writer.start()
+        self.addCleanup(lambda: (requested.set(), release.set(), writer.join(timeout=4)))
+        with patch.object(workspace_runner, '_task_blockers', side_effect=checking):
+            stop, thread, errors = self.start_runner()
+            self.decide()
+            self.wait_until(lambda: all(task['status'] == 'done' for task in self.view()['tasks']
+                                       if task['id'] in {'TASK-002', 'TASK-003'}))
+            self.assertEqual([call['role'] for call in self.calls], ['backend', 'qa'])
+            self.assertEqual(len(contentions), 1)
+            self.assertGreaterEqual(len(attempts), 3)  # Retry, then independent QA selection.
+            self.assertEqual(holder_errors, [])
+            self.assertEqual(errors, [])
+            self.assertTrue(thread.is_alive())
+
+    def test_invalid_task_blocker_policy_is_not_retried_or_silently_ignored(self):
+        with patch.object(workspace_runner, '_task_blockers', side_effect=ValueError('Synthetic invalid blocker policy')) as check:
+            stop, thread, errors = self.start_runner()
+            self.decide()
+            thread.join(timeout=4)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(check.call_count, 1)
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(str(errors[0]), 'Synthetic invalid blocker policy')
+            self.assertEqual(self.calls, [])
+            self.assertFalse(any(command['status'] == 'completed' for command in self.view()['commands']))
 
     def test_http_approval_automatically_runs_backend_then_independent_qa(self):
         stop, thread, errors = self.start_runner()

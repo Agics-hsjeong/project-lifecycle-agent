@@ -12,7 +12,7 @@ import time
 import uuid
 
 from tools import lifecycle, role_agents, runs, starter, workspace
-from tools.storage import atomic_write, confined, json_bytes, lock, process_alive
+from tools.storage import atomic_write, confined, consistent_read, json_bytes, lock, process_alive
 
 LEASE = "state/workspace-runner.lock"
 PROVIDERS = {"codex", "claude"}
@@ -36,6 +36,12 @@ def _retry(function, seconds=3.0):
 
 def _snapshot(root):
     return _retry(lambda: workspace.snapshot(root))
+
+
+@consistent_read
+def _task_blockers(root, tasks, identifier):
+    """Read gate/context dependencies under one managed-state read lock."""
+    return workspace.blockers(root, workspace.read(root), tasks, identifier)
 
 
 def _host(root, identity, kind, **fields):
@@ -454,7 +460,7 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
                 waiting_note = "실행 가능한 다음 작업을 기다립니다."
                 for command in queued:
                     task = tasks.get(command["task_id"])
-                    if not task or workspace.blockers(root, workspace.read(root), tasks, task["id"]):
+                    if not task or _retry(lambda: _task_blockers(root, tasks, task["id"])):
                         continue
                     try:
                         _policy(task)
