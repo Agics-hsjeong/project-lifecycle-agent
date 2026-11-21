@@ -12,11 +12,13 @@ import unittest
 from tools import starter, verification_runtime as runtime
 
 
-def node_child_forwarder(check):
+def node_child_forwarder(check, *, diagnostics=False):
     # On POSIX, stdout/stderr pipes flush asynchronously. Setting exitCode lets
     # Node finish pending writes instead of process.exit() truncating evidence.
-    return ("const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],{encoding:'utf8'});"
-            "process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');process.exitCode=child.status===null?1:child.status;")
+    before = ("require('fs').writeSync(2,'ieum:parent:start '+JSON.stringify({execPath:process.execPath,argv:process.argv,cwd:process.cwd()}).slice(0,2048)+'\\n');" if diagnostics else '')
+    after = ("require('fs').writeSync(2,'ieum:parent:child '+JSON.stringify({status:child.status,signal:child.signal,error:child.error?String(child.error):null,stdoutBytes:(child.stdout||'').length,stderrBytes:(child.stderr||'').length}).slice(0,2048)+'\\n');" if diagnostics else '')
+    return (before+"const child=require('child_process').spawnSync(process.execPath,['-e',"+json.dumps(check)+"],{encoding:'utf8'});"+
+            after+"process.stdout.write(child.stdout||'');process.stderr.write(child.stderr||'');process.exitCode=child.status===null?1:child.status;")
 
 
 class RuntimeTests(unittest.TestCase):
@@ -117,10 +119,10 @@ class RuntimeTests(unittest.TestCase):
         (fixture/'index.cjs').write_text('module.exports = 73;\n')
         npm=self.base/'trusted-npm';(npm/'bin').mkdir(parents=True)
         private=self.project/'private-fixture.txt';private.write_text('Synthetic original project sentinel')
-        check=("const fs=require('fs');const assert=require('assert/strict');"
+        check=("const fs=require('fs');const assert=require('assert/strict');fs.writeSync(2,'ieum:child:start\\n');"
                "assert.equal(require('./node_modules/fixture/index.cjs'),73);"
-               "assert.throws(()=>fs.readFileSync("+json.dumps(str(private))+"));console.log('child:73; original:denied')")
-        script=node_child_forwarder(check)
+               "assert.throws(()=>fs.readFileSync("+json.dumps(str(private))+"));fs.writeFileSync(process.env.IEUM_VERIFICATION_SCRATCH+'/node-child-completed','child:73; original:denied');console.log('child:73; original:denied')")
+        script=node_child_forwarder(check, diagnostics=True)
         (npm/'bin/npm-cli.js').write_text(script,encoding='utf-8')
         approved=runtime.register(self.project,kind='node',lockfile='requirements.lock',packages=self.packages,node=Path(shutil.which('node')),npm=npm)
         plan=runtime.prepare(['npm','test'],self.copy,{'runtime_ref':approved['runtime_ref']},self.scratch,project=self.project)
@@ -129,8 +131,18 @@ class RuntimeTests(unittest.TestCase):
         try:
             stdout=self.base/'node.stdout';stderr=self.base/'node.stderr'
             code,_=host_providers._process(command,self.copy,None,stdout,stderr,20,environment=environment)
-            self.assertEqual(code,0,stderr.read_text(encoding='utf-8',errors='replace'))
-            self.assertIn('child:73; original:denied',stdout.read_text(encoding='utf-8'))
+            actual_stdout=stdout.read_text(encoding='utf-8',errors='replace')
+            actual_stderr=stderr.read_text(encoding='utf-8',errors='replace')
+            completed=self.scratch/'node-child-completed'
+            diagnostic=json.dumps({'exit_code':code,'verifier_started':Path(boundary['started_marker']).is_file(),
+                'child_completed':completed.is_file(),'planned_argv':plan['argv'],'launcher':command[:2],
+                'node_options':environment.get('NODE_OPTIONS'),'stdout':actual_stdout[-2048:],
+                'stderr':actual_stderr[-4096:]},ensure_ascii=False)
+            self.assertEqual(code,0,diagnostic)
+            self.assertTrue(Path(boundary['started_marker']).is_file(),diagnostic)
+            self.assertTrue(completed.is_file(),diagnostic)
+            self.assertEqual(completed.read_text(encoding='utf-8'),'child:73; original:denied',diagnostic)
+            self.assertIn('child:73; original:denied',actual_stdout,diagnostic)
             runtime.assert_unchanged(plan)
         finally:
             sandbox.cleanup(boundary)
