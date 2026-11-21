@@ -99,7 +99,8 @@ class WorkspaceTests(unittest.TestCase):
         self.host("started", command_id=command["id"])
         self.host("failed", command_id=command["id"], notes="Synthetic test process failed")
         task = next(t for t in workspace.snapshot(self.root)["tasks"] if t["id"] == "TASK-002")
-        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(workspace.snapshot(self.root)["summary_counts"]["failed"], 1)
         self.host("retry", command_id=command["id"], notes="Synthetic failure resolved; explicit retry")
         self.assertEqual(self.host("claim")["command"]["id"], command["id"])
 

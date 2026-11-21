@@ -58,6 +58,10 @@ class NativeActivityTests(unittest.TestCase):
             side_effect=lambda argv, root, project, **kw: (argv, safe_environment(root), {'backend': 'synthetic-unit-fixture'}))
         fixture_sandbox.start()
         self.addCleanup(fixture_sandbox.stop)
+        # Synthetic CLI seam; actual native tool boundaries have separate live tests.
+        worker = patch('tools.worker_boundary.prepare', side_effect=lambda provider, cmd, *args, **kw:
+            {'argv': cmd, 'env': None, 'contract': {'backend': 'synthetic-unit-fixture'}})
+        worker.start(); self.addCleanup(worker.stop)
         with contextlib.redirect_stdout(io.StringIO()):
             self.project=Path(starter.init_project(self.base/'projects','observed','Synthetic observed work','product',profile='api'))
         (self.project/'src').mkdir();(self.project/'src/policy.py').write_text('VALUE = 1\n',encoding='utf-8')
@@ -65,7 +69,7 @@ class NativeActivityTests(unittest.TestCase):
 
     def task(self, role, outputs):
         return {'id':'synthetic-'+role,'role':role,'execution':{'instruction':'Scoped synthetic test fixture',
-            'allowed_paths':outputs,'expected_outputs':outputs,
+            'allowed_paths':outputs,'expected_outputs':outputs,'input_paths':['src','tests'],
             'verification_commands':[[sys.executable,'-m','unittest','discover','-s','tests','-v']]}}
 
     def job(self, mode, task, directory, **options):
@@ -153,7 +157,7 @@ class NativeActivityTests(unittest.TestCase):
             'tasks':[{'role':'backend','owner':'automatic','status':'todo','next_action':'Implement value','requirement_ids':'REQ-001'},
                 {'role':'qa','owner':'automatic','status':'todo','next_action':'Check independently','requirement_ids':'REQ-001'}]},'synthetic-setup')
         snapshot=workspace.snapshot(self.project)
-        backend=self.task('backend',['src/policy.py'])['execution'];backend['verification_commands']=[]
+        backend=self.task('backend',['src/policy.py'])['execution'];backend['verification_commands']=[[sys.executable,'-c',"import ast; from pathlib import Path; ast.parse(Path('src/policy.py').read_text())"]]
         qa=self.task('qa',['tests/test_edge.py','reports/qa.md'])['execution']
         workspace.configure(self.project,{'expected_revision':snapshot['revision'],'policy':{'view_mode':'observer','auto_run':True},'tasks':[
             {'id':'TASK-001','execution':backend},

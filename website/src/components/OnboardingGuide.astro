@@ -63,7 +63,7 @@ const requests={
     url.searchParams.set('host', host);
     url.searchParams.set('step', keys[step]);
     history.replaceState(history.state, '', url);
-    const invocation = host === 'codex' ? '$project-lifecycle' : '/project-lifecycle-agent:project-lifecycle';
+    const invocation = host === 'codex' ? '$ieum' : '/project-lifecycle-agent:ieum';
     requests.forEach(({ input, source }) => { input.value = invocation + '\n' + source; });
     panels[step]?.querySelectorAll('copy-block').forEach(node => node.dispatchEvent(new Event('copy-block-refresh')));
     if (focus) {

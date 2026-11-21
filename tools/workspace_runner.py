@@ -168,7 +168,7 @@ def _identity(provider, runner_id, command_id, role):
     return {"provider": provider, "agent_id": f"runner:{runner_id}:{command_id}", "role": role}
 
 
-def _mark_failed(root, task, command, identity, notes, usage=None):
+def _mark_failed(root, task, command, identity, notes, usage=None, verification_summary=None):
     notes = str(notes)[:9000] or "실제 실행 결과를 확인하지 못했습니다."
     if task.get("run_id"):
         current = _retry(lambda: runs.inspect(root, task["run_id"]))
@@ -177,6 +177,8 @@ def _mark_failed(root, task, command, identity, notes, usage=None):
         if observed.get("status") not in {"succeeded", "skipped", "failed"}:
             _run_result(root, task, command["id"], "failed", [], notes)
     fields = {"command_id": command["id"], "notes": notes}
+    if verification_summary is not None:
+        fields["verification_summary"] = verification_summary
     if usage is not None:
         fields["usage"] = usage
     return _host(root, identity, "failed", **fields)
@@ -250,7 +252,8 @@ def _validate_receipts(root, task, result, command_id):
     refs = result.get("evidence_refs")
     if not isinstance(refs, list) or not refs or any(not isinstance(p, str) for p in refs):
         raise ValueError("실제 완료 근거 경로가 필요합니다.")
-    policy = _policy(task)
+    from tools.host_providers import _execution
+    policy = _execution(task, root)
     expected = policy["expected_outputs"]
     if not set(expected).issubset(refs):
         raise ValueError("계획한 산출물의 완료 근거가 누락됐습니다.")
@@ -267,7 +270,67 @@ def _validate_receipts(root, task, result, command_id):
             for item, argv in zip(results, required)):
         raise ValueError("명시한 독립 검증 명령의 성공 영수증이 필요합니다.")
     runs.hashes(root, refs)
+    contract = result.get("verification_contract")
+    if contract is None:
+        raise ValueError("검증된 최종 바이트의 감독자 계약이 필요합니다.")
+    if contract is not None:
+        from tools.verification_contract import canonical, digest, task_context
+        if not isinstance(contract, dict) or contract.get("schema_version") != 1:
+            raise ValueError("검증 대상 계약의 형식이 잘못되었습니다.")
+        verified = contract.get("verified_outputs")
+        if not isinstance(verified, dict) or not (set(expected) | (set(refs) - {verification_ref})).issubset(verified):
+            raise ValueError("계획한 최종 출력이 검증 대상 영수증에 없습니다.")
+        if contract.get("execution_sha256") != digest(canonical(policy)):
+            raise ValueError("검증된 실행 계획과 현재 작업이 다릅니다.")
+        if contract.get("task_context_sha256") != digest(canonical(task_context(task))):
+            raise ValueError("검증된 역할·요구사항 계약과 현재 작업이 다릅니다.")
+        identity = digest(canonical(verified))
+        if contract.get("verified_output_sha256") != identity or contract.get("published_output_sha256") != identity:
+            raise ValueError("검증한 출력과 반영한 출력의 식별자가 다릅니다.")
+        for relative, record in verified.items():
+            if not any(relative == owned.rstrip('/') or relative.startswith(owned.rstrip('/') + '/') for owned in policy['allowed_paths']):
+                raise ValueError('검증된 출력이 담당 범위 밖입니다.')
+            path = workspace.execution_path(root, relative)
+            if not isinstance(record, dict) or set(record) != {"sha256", "bytes"} or not path.is_file():
+                raise ValueError("검증된 최종 출력이 실제 파일과 다릅니다.")
+            if workspace.file_hash(root, relative) != record["sha256"] or path.stat().st_size != record["bytes"]:
+                raise ValueError("검증 후 최종 출력이 변경되어 완료 처리하지 않습니다.")
     return list(dict.fromkeys(refs))
+
+
+def _verification_summary(result):
+    result = result if isinstance(result, dict) else {}
+    contract = result.get("verification_contract") or {}
+    mode = result.get("verification_mode", "execute")
+    checks = len(result.get("verification") or [])
+    manifest = contract.get("verification_manifest_sha256")
+    if result.get("success") and manifest:
+        status = "artifact_only" if mode == "artifact_only" else "passed"
+        if mode == "execute" and not checks:
+            status = "not_run"
+        return {"mode": mode, "status": status, "checks": checks,
+                "manifest_sha": manifest, "source": "supervisor"}
+    status = "failed" if checks or manifest or result.get("verification_status") == "failed" or result.get("failure_kind") in {"verification_failed", "verification_integrity", "output_syntax"} else "unknown"
+    return {"mode": mode if mode in {"execute", "artifact_only"} else "execute",
+            "status": status, "checks": checks, "source": "host-reported"}
+
+
+def _budget_reason(snapshot, limits, elapsed):
+    if not limits:
+        return None
+    if limits.get("max_seconds") and elapsed >= limits["max_seconds"]:
+        return "실행 시간 한도에 도달해 다음 작업을 시작하지 않습니다."
+    usage = snapshot.get("usage", {})
+    if limits.get("unknown_usage", "stop") == "stop":
+        # A missing price must not block a fully measured token-only budget.
+        for key, missing_key in (("max_tokens", "tokens_unreported_attempts"), ("max_cost_usd", "cost_unreported_attempts")):
+            if key in limits and usage.get(missing_key, usage.get("unreported_attempts", 0)):
+                return "사용량이 미집계된 실행이 있어 예산 확인 전 다음 작업을 시작하지 않습니다."
+    for field, key, label in (("known_tokens", "max_tokens", "토큰"), ("known_cost_usd", "max_cost_usd", "비용")):
+        observed = usage.get(field)
+        if limits.get(key) is not None and observed is not None and observed >= limits[key]:
+            return label + " 관측 한도에 도달해 다음 작업을 시작하지 않습니다."
+    return None
 
 
 def _observed_usage(result, task):
@@ -323,6 +386,8 @@ def _execute(root, provider, task, command, role, lease, job_dir, run_job, stop_
 
     try:
         _policy(task)
+        from tools.host_providers import _execution
+        _execution(task, root)  # Validate code/document policy before any adapter starts.
         job_dir.mkdir(parents=True, exist_ok=False)
         if role['id'] in {'qa', 'reviewer', 'security'}:
             view = _snapshot(root)
@@ -346,24 +411,31 @@ def _execute(root, provider, task, command, role, lease, job_dir, run_job, stop_
         if type(pid) is int and pid != os.getpid() and process_alive(pid):
             raise RuntimeError("호스트 프로세스가 아직 종료되지 않았습니다. 중복 작업을 시작하지 않습니다.")
         refs = _validate_receipts(root, task, result, command["id"])
-        summary = str(result.get("summary") or "실제 출력과 검증 영수증을 확인했습니다.")[:8000]
+        summary = workspace.public_summary(str(result.get("summary") or "실제 출력과 검증 영수증을 확인했습니다."))
+        verification_summary = _verification_summary(result)
         report_relative = f"reports/runner/{command['id']}/receipt.json"
         report = {"schema_version": 1, "provider": provider, "provider_session_id": result.get("provider_session_id"),
             "command_id": command["id"], "task_id": task["id"], "role": role["id"], "at": starter.now(),
             "attempt_id": task.get("_attempt_id"),
             "summary": summary, "evidence_hashes": runs.hashes(root, refs), "verification": result.get("verification", []),
-            "usage": _observed_usage(result, task)}
+            "usage": _observed_usage(result, task), "verification_summary": verification_summary,
+            "verification_contract": result.get("verification_contract"), "input_manifest": result.get("input_manifest")}
+        from tools.sensitive_data import redact_value
+        report = redact_value(report)
         atomic_write(confined(root, report_relative), json_bytes(report))
         atomic_write(job_dir / "supervisor-receipt.json", json_bytes({**report, "status": "completed"}))
         refs.append(report_relative)
         _run_result(root, task, command["id"], "succeeded", refs, summary)
-        fields = {"command_id": command["id"], "notes": summary, "evidence_refs": refs}
+        fields = {"command_id": command["id"], "notes": summary, "evidence_refs": refs,
+                  "verification_summary": verification_summary}
+        if result.get("verification_contract"):
+            fields["verified_outputs"] = result["verification_contract"]["verified_outputs"]
         if result.get("usage") is not None:
             fields["usage"] = _observed_usage(result, task)
         _host(root, identity, "completed", **fields)
         terminal_recorded = True
-        _activity(root, identity, task, command, 'completed', role['label'] + ' 산출물 및 독립 검증 완료', status='completed')
-        if review_target:
+        _activity(root, identity, task, command, 'completed', role['label'] + (' 산출물·등록 검증 완료' if verification_summary['status'] == 'passed' else ' 산출물 확인 · 실행 검증 근거 별도'), status='completed')
+        if review_target and verification_summary['status'] == 'passed':
             def record_review():
                 return workspace.review_event(root, {'expected_revision':_snapshot(root)['revision'],
                     'review_id':'REVIEW-'+command['id'], 'task_id':review_target['id'], 'agent_id':identity['agent_id'],
@@ -392,7 +464,7 @@ def _execute(root, provider, task, command, role, lease, job_dir, run_job, stop_
             # are unavailable (for example a full separate log volume).
             pass
         try:
-            _mark_failed(root, task, command, identity, str(error), usage=_observed_usage(observed, task))
+            _mark_failed(root, task, command, identity, str(error), usage=_observed_usage(observed, task), verification_summary=_verification_summary({**observed, "success": False}))
             terminal_recorded = True
         except Exception as record_error:
             raise RuntimeError("작업 실패 기록을 저장하지 못했습니다: " + str(record_error)) from error
@@ -451,6 +523,7 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
         output["recovered"].extend(_recover_orphaned_claims(root))
         _telemetry(root, lease.record, "starting", notes="관제 실행기 시작")
         last_idle = 0.0
+        session_started = time.monotonic()
         try:
             while not stop_event.is_set():
                 snapshot = _snapshot(root)
@@ -458,7 +531,11 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
                 queued = [q for q in snapshot.get("commands", []) if q["status"] == "queued"]
                 selected = None
                 waiting_note = "실행 가능한 다음 작업을 기다립니다."
-                for command in queued:
+                limits = snapshot.get("policy", {}).get("limits", {})
+                budget_reason = _budget_reason(snapshot, limits, time.monotonic() - session_started)
+                if budget_reason:
+                    waiting_note = budget_reason
+                for command in ([] if budget_reason else queued):
                     task = tasks.get(command["task_id"])
                     if not task or _retry(lambda: _task_blockers(root, tasks, task["id"])):
                         continue
@@ -494,7 +571,11 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
                 attempt_id = "attempt-" + uuid.uuid4().hex
                 task = {**task, "_attempt_id": attempt_id}
                 job_dir = job_root / attempt_id / command["id"]
-                outcome = _execute(root, provider, task, claimed, role, lease, job_dir, run_job, stop_event, options, identity)
+                job_options = dict(options)
+                if limits.get("max_seconds"):
+                    remaining = limits["max_seconds"] - (time.monotonic() - session_started)
+                    job_options["timeout"] = max(0.01, min(options.get("timeout", 900), remaining))
+                outcome = _execute(root, provider, task, claimed, role, lease, job_dir, run_job, stop_event, job_options, identity)
                 output["jobs"].append(outcome)
                 if outcome['success']:
                     view = _snapshot(root)

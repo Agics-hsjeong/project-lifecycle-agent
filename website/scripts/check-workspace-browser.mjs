@@ -85,6 +85,7 @@ async function pageFor(
   demo = false,
   width = 1440,
   initialWait = true,
+  onArtefact,
 ) {
   const p = await browser.newPage({
     viewport: { width, height: 1000 },
@@ -99,6 +100,13 @@ async function pageFor(
   await p.route("**/*", async (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === "/api/snapshot") return onSnapshot(route);
+    if (u.pathname === "/api/artefact")
+      return onArtefact
+        ? onArtefact(route)
+        : route.fulfill({
+            status: 404,
+            json: { error: "Synthetic file not connected" },
+          });
     if (u.pathname === "/api/diff")
       return onDiff
         ? onDiff(route)
@@ -685,6 +693,262 @@ try {
       ),
       "mobile workspace has no page overflow",
     );
+    await p.close();
+  }
+  // Scope, execution source and verification semantics must agree in the real rendered UI.
+  for (const width of [1440, 390, 320]) {
+    const raw = snapshot();
+    raw.host = {
+      connected: true,
+      execution_mode: "native",
+      runner_connected: false,
+    };
+    raw.tasks = [
+      {
+        ...raw.tasks[0],
+        id: "DONE",
+        title: "검증된 완료",
+        status: "done",
+        verification: { status: "passed", checks: 1, source: "supervisor" },
+      },
+      {
+        ...raw.tasks[0],
+        id: "OMIT",
+        title: "계약 범위 제외",
+        status: "skipped",
+      },
+      {
+        ...raw.tasks[0],
+        id: "FAIL",
+        title: "실패 확인",
+        status: "failed",
+        verification: { status: "failed", checks: 1 },
+      },
+    ];
+    raw.usage = {
+      tokens: null,
+      cost: null,
+      known_tokens: 100,
+      known_cost_usd: 0.1,
+      coverage: "partial",
+      total_attempts: 2,
+      observed_attempts: 1,
+      unreported_attempts: 1,
+    };
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      null,
+      false,
+      width,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes("1 / 2 완료"),
+      `${width}: excluded tasks are not counted as complete`,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes("50%"),
+      `${width}: applicable completion is fifty percent`,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes("0 대기"),
+      `${width}: failed task is not ordinary waiting`,
+    );
+    check(
+      (await p.locator(".execution-hud").innerText()).includes(
+        "현재 호스트의 활동 보고",
+      ),
+      `${width}: native observation is not missing CLI failure`,
+    );
+    check(
+      (await p.locator(".execution-hud").innerText()).includes("미집계 1회"),
+      `${width}: observed subtotal is visibly partial`,
+    );
+    if (process.env.IEUM_TEST_SCREENSHOTS) {
+      fs.mkdirSync(process.env.IEUM_TEST_SCREENSHOTS, { recursive: true });
+      await p.screenshot({
+        path: path.join(
+          process.env.IEUM_TEST_SCREENSHOTS,
+          `observer-${width}.png`,
+        ),
+        fullPage: true,
+      });
+    }
+    await p
+      .locator('.b-task-row[data-task-id="DONE"]')
+      .getByRole("button")
+      .first()
+      .click();
+    if (width >= 800)
+      await p
+        .getByRole("button", { name: "작업 상세 보기", exact: true })
+        .click();
+    const first = p.getByRole("tab", { name: "실행 활동", exact: true });
+    await first.focus();
+    await p.keyboard.press("ArrowRight");
+    check(
+      (await p
+        .getByRole("tab", { name: "파일·Diff", exact: true })
+        .getAttribute("aria-selected")) === "true",
+      `${width}: inspector arrow activates adjacent tab`,
+    );
+    check(
+      (await p.locator('[role="tab"][tabindex="0"]').count()) === 1,
+      `${width}: inspector uses roving tab stop`,
+    );
+    check(
+      (await p.getByRole("tabpanel").getAttribute("aria-labelledby")) ===
+        "inspector-tab-diff",
+      `${width}: panel is named by selected tab`,
+    );
+    await p.keyboard.press("End");
+    await p
+      .locator('#inspector-tab-guidelines[aria-selected="true"]')
+      .waitFor();
+    check(
+      (await p
+        .getByRole("tab", { name: "관찰 안내", exact: true })
+        .getAttribute("aria-selected")) === "true",
+      `${width}: inspector End works`,
+    );
+    await p.keyboard.press("Home");
+    await p.locator('#inspector-tab-activity[aria-selected="true"]').waitFor();
+    check(
+      (await first.getAttribute("aria-selected")) === "true",
+      `${width}: inspector Home works`,
+    );
+    await p.keyboard.press("Escape");
+    await p.locator(".inspector").waitFor({ state: "detached" });
+    check(
+      (await p.locator(".inspector").count()) === 0,
+      `${width}: inspector Escape still closes`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+      `${width}: quality HUD and filters do not overflow`,
+    );
+    await p.close();
+  }
+  {
+    const raw = snapshot();
+    raw.tasks[0].status = "skipped";
+    const p = await pageFor((route) => route.fulfill({ json: raw }));
+    check(
+      (await p.locator(".overall-progress").innerText()).includes(
+        "적용 대상 없음",
+      ),
+      "all-excluded scope has no fake completion percentage",
+    );
+    check(
+      (await p.locator('.overall-progress [role="progressbar"]').count()) === 0,
+      "no applicable tasks are not an indeterminate progress bar",
+    );
+    await p.close();
+  }
+  // Local delivery uses the exact registered version with a header-only credential.
+  {
+    const raw = snapshot();
+    raw.tasks[0].status = "done";
+    raw.artefacts[0] = {
+      id: "ART-R",
+      path: "docs/result.png",
+      sha256: "a".repeat(64),
+      exists: true,
+    };
+    raw.tasks[0].artefact_ids = ["ART-R"];
+    const png = fs.readFileSync(path.join(website, "public/brand/symbol.png"));
+    let requests = 0,
+      stale = false,
+      unsafe = false;
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      (route) =>
+        route.fulfill({
+          json: {
+            path: "docs/result.png",
+            sha256: "a".repeat(64),
+            binary: true,
+          },
+        }),
+      false,
+      1440,
+      true,
+      (route) => {
+        requests++;
+        const u = new URL(route.request().url());
+        check(
+          u.searchParams.get("id") === "ART-R" &&
+            u.searchParams.get("sha256") === "a".repeat(64),
+          "delivery is bound to registered ID and SHA",
+        );
+        check(
+          route.request().headers().authorization ===
+            "Bearer regression-fixture" &&
+            !u.href.includes("regression-fixture"),
+          "delivery token stays in authorization header",
+        );
+        return stale
+          ? route.fulfill({
+              status: 409,
+              json: { error: "Synthetic file version changed" },
+            })
+          : unsafe
+            ? route.fulfill({
+                contentType: "image/svg+xml",
+                body: '<svg xmlns="http://www.w3.org/2000/svg"><text>Unsafe inline format</text></svg>',
+              })
+            : route.fulfill({ contentType: "image/png", body: png });
+      },
+    );
+    await p
+      .locator(".workspace-tabs button")
+      .filter({ hasText: "산출물" })
+      .click();
+    await p
+      .getByRole("button")
+      .filter({ hasText: "result.png" })
+      .first()
+      .click();
+    await p.getByRole("tab", { name: "파일·Diff", exact: true }).click();
+    await p.getByRole("button", { name: "미리보기", exact: true }).click();
+    await p.locator(".artefact-preview img").waitFor();
+    await p.waitForFunction(
+      () => document.querySelector(".artefact-preview img")?.naturalWidth > 0,
+    );
+    check(
+      await p
+        .locator(".artefact-preview img")
+        .getAttribute("src")
+        .then((x) => x.startsWith("blob:")),
+      "static image preview is created from authenticated bytes",
+    );
+    const download = p.waitForEvent("download");
+    await p.getByRole("button", { name: "다운로드", exact: true }).click();
+    const received = await download;
+    check(
+      received.suggestedFilename() === "result.png",
+      "file delivery uses the current registered filename",
+    );
+    unsafe = true;
+    await p.getByRole("button", { name: "미리보기", exact: true }).click();
+    await p.getByRole("alert").filter({ hasText: "HTML·SVG" }).waitFor();
+    check(
+      (await p.locator(".artefact-preview").count()) === 0,
+      "active or mislabeled SVG never becomes inline preview",
+    );
+    unsafe = false;
+    stale = true;
+    await p.getByRole("button", { name: "미리보기", exact: true }).click();
+    await p
+      .getByRole("alert")
+      .filter({ hasText: "Synthetic file version changed" })
+      .waitFor();
+    check(
+      (await p.locator(".artefact-preview").count()) === 0,
+      "stale version cannot retain an old preview",
+    );
+    check(requests === 4, "read-only file actions issue only requested GETs");
     await p.close();
   }
   check(

@@ -45,7 +45,9 @@ class RunnerTests(unittest.TestCase):
 
     def policy(self, path):
         return {"instruction": "Write a synthetic test output only", "allowed_paths": [path],
-                "expected_outputs": [path], "verification_commands": []}
+                "expected_outputs": [path], "verification_commands": [[sys.executable, "-c",
+                    "from pathlib import Path; import ast; p=Path(" + repr(path) + "); assert p.is_file(); " +
+                    ("ast.parse(p.read_text(encoding='utf-8'))" if path.endswith('.py') else "assert p.stat().st_size > 0")]]}
 
     def rev(self):
         history = lifecycle.events(self.root)
@@ -68,9 +70,19 @@ class RunnerTests(unittest.TestCase):
         for relative in outputs:
             path = Path(project) / relative
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("Synthetic actual output: " + role["id"] + "\n", encoding="utf-8")
+            path.write_text(("VALUE = 2\n" if path.suffix == '.py' else "Synthetic actual output: " + role["id"] + "\n"), encoding="utf-8")
+        # Explicit synthetic adapter seam: real checks and byte receipts, no OS isolation claim.
+        checks = []
+        for command in task["execution"]["verification_commands"]:
+            checked = subprocess.run(command, cwd=project, capture_output=True, timeout=10)
+            checks.append({"command": command, "exit_code": checked.returncode})
+            if checked.returncode:
+                raise AssertionError(checked.stderr.decode(errors="replace"))
+        from tools.verification_contract import VerificationContract
+        files = {name: (Path(project) / name).read_bytes() for name in outputs}
+        contract = VerificationContract(files, task["execution"], task).receipt(files)
         return {"success": True, "summary": "Synthetic fixture output written", "evidence_refs": outputs,
-                "process_started": True, "verification": [], "exit_code": 0}
+                "process_started": True, "verification": checks, "verification_contract": contract, "exit_code": 0}
 
     def execute(self, function=None, max_jobs=2):
         return runner.run_forever(self.root, "codex", poll_interval=0.02,
@@ -252,7 +264,11 @@ class RunnerTests(unittest.TestCase):
         policy = {**self.policies["TASK-002"], "verification_commands": [[sys.executable, "-c", "print('synthetic validation')"]]}
         workspace.configure(self.root, {"expected_revision": self.rev(), "tasks": [{"id": "TASK-002", "execution": policy}]})
         self.decide()
-        result = self.execute(max_jobs=1)
+        def missing_checks(*args, **options):
+            result = self.fake(*args, **options)
+            result['verification'] = []
+            return result
+        result = self.execute(missing_checks, max_jobs=1)
         self.assertEqual(result["failed"], 1)
         self.assertIn("검증 명령", result["jobs"][0]["error"])
 
@@ -417,7 +433,7 @@ class RunnerTests(unittest.TestCase):
         failed_view = workspace.snapshot(self.root)
         command = failed_view["commands"][0]
         self.assertEqual(command["status"], "failed")
-        self.assertEqual(next(t for t in failed_view["tasks"] if t["id"] == "TASK-002")["status"], "blocked")
+        self.assertEqual(next(t for t in failed_view["tasks"] if t["id"] == "TASK-002")["status"], "failed")
         self.assertFalse((self.root / runner.LEASE).exists())
         self.assertTrue(any(a["kind"] == "failed" for a in failed_view["activities"]))
         blocked.unlink()
@@ -517,3 +533,82 @@ class RunnerTests(unittest.TestCase):
             self.assertFalse((self.root / runner.LEASE).exists())
         finally:
             stop.set(); thread.join(5)
+
+    def test_verified_contract_is_required_and_binds_task_plan_and_final_output(self):
+        task = next(t for t in workspace.snapshot(self.root)['tasks'] if t['id']=='TASK-002')
+        for mode in ('missing', 'task', 'plan', 'published', 'bytes'):
+            with self.subTest(mode=mode):
+                result = self.fake(self.root, task, {'id':'backend'}, self.base/'receipt-fixture', on_started=lambda pid: None)
+                if mode=='missing':
+                    result.pop('verification_contract')
+                elif mode=='task':
+                    result['verification_contract']['task_context_sha256']=None
+                elif mode=='plan':
+                    result['verification_contract']['execution_sha256']='0'*64
+                elif mode=='published':
+                    result['verification_contract']['published_output_sha256']='0'*64
+                else:
+                    (self.root/'src/feature.py').write_text('VALUE = 999\n')
+                with self.assertRaises(ValueError):
+                    runner._validate_receipts(self.root, task, result, 'CMD-synthetic')
+
+    def test_final_output_mutation_between_validation_and_completion_is_rejected(self):
+        self.decide()
+        original = runner._validate_receipts
+        def mutate(root, task, result, command_id):
+            refs = original(root, task, result, command_id)
+            (Path(root)/'src/feature.py').write_text('VALUE = 999\n')
+            return refs
+        with patch.object(runner, '_validate_receipts', side_effect=mutate):
+            result=self.execute(max_jobs=1)
+        self.assertEqual(result['failed'],1,result)
+        self.assertIn('변경', result['jobs'][0]['error'])
+        final=workspace.snapshot(self.root)
+        self.assertEqual(final['commands'][0]['status'],'failed')
+        self.assertEqual(final['commands'][0]['verification_summary']['status'],'failed')
+        self.assertEqual(next(t for t in final['tasks'] if t['id']=='TASK-003')['status'],'blocked')
+
+    def test_budget_stops_next_job_and_reports_waiting_until_explicit_stop(self):
+        workspace.configure(self.root, {'expected_revision':self.rev(), 'policy':{'limits':{'max_tokens':5}}})
+        self.decide()
+        def metered(*args, **options):
+            result=self.fake(*args, **options)
+            result['usage']={'tokens':5, 'cost_usd':0.01, 'source':'synthetic-meter', 'coverage':'complete'}
+            return result
+        stop,thread,result,errors=self.launch_waiting(metered)
+        self.wait_for(lambda: workspace.snapshot(self.root)['usage']['known_tokens']==5)
+        self.wait_for(lambda: any('한도' in r.get('notes','') for r in workspace.snapshot(self.root)['runners']))
+        self.assertEqual(self.calls,[('TASK-002','backend')])
+        self.assertTrue(thread.is_alive())
+        stop.set();thread.join(5)
+        self.assertEqual(errors,[])
+        self.assertEqual(result['completed'],1)
+
+    def test_token_only_budget_does_not_wait_for_unreported_price(self):
+        snapshot={'usage':{'known_tokens':20,'known_cost_usd':None,'unreported_attempts':1,
+                           'tokens_unreported_attempts':0,'cost_unreported_attempts':1}}
+        self.assertIsNone(runner._budget_reason(snapshot,{'max_tokens':100},0))
+        self.assertIn('미집계',runner._budget_reason(snapshot,{'max_cost_usd':1},0))
+        self.assertIn('토큰',runner._budget_reason(snapshot,{'max_tokens':20},0))
+
+    def test_budget_reason_distinguishes_unknown_measurement_and_known_limits(self):
+        self.assertIn('미집계',runner._budget_reason({'usage':{'unreported_attempts':1}}, {'max_tokens':100},0))
+        self.assertIsNone(runner._budget_reason({'usage':{'unreported_attempts':1}}, {'max_tokens':100,'unknown_usage':'warn'},0))
+        self.assertIn('시간',runner._budget_reason({}, {'max_seconds':1},1))
+        self.assertIn('비용',runner._budget_reason({'usage':{'known_cost_usd':1}}, {'max_cost_usd':1},0))
+
+    def test_qa_environment_failure_never_schedules_code_repair(self):
+        self.decide()
+        self.assertEqual(self.execute(max_jobs=1)['completed'],1)
+        def unsupported(*args,**options):
+            result=self.fake(*args,**options)
+            result.update(success=False,failure_kind='environment_unavailable',error='Unsupported network-isolated runtime')
+            return result
+        with patch.object(workspace,'schedule_repair') as schedule:
+            result=self.execute(unsupported,max_jobs=1)
+        self.assertEqual(result['failed'],1,result)
+        schedule.assert_not_called()
+        final=workspace.snapshot(self.root)
+        self.assertEqual(len(final['commands']),2)
+        self.assertEqual(self.calls,[('TASK-002','backend'),('TASK-003','qa')])
+        self.assertFalse(any(a['kind']=='repair_requested' for a in final['activities']))

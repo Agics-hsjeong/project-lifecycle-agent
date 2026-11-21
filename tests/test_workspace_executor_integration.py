@@ -166,14 +166,22 @@ class ExecutorIntegrationTests(unittest.TestCase):
             (root / "reports/qa.md").write_text("Synthetic independent QA: owner policy verified.\n", encoding="utf-8")
         else:
             raise AssertionError("Unexpected automatic role: " + role)
+        # This explicit synthetic adapter executes the configured checks and
+        # seals their real output bytes. It makes no native sandbox claim.
+        from tools.verification_contract import VerificationContract
+        outputs = task["execution"]["expected_outputs"]
+        files = {name: (root / name).read_bytes() for name in outputs}
+        sealed = VerificationContract(files, task["execution"], task)
         results = []
-        for command in task["execution"].get("verification_commands", []):
+        for command in task["execution"]["verification_commands"]:
             result = subprocess.run(command, cwd=root, capture_output=True, text=True, encoding="utf-8", timeout=5)
             results.append({"command": command, "exit_code": result.returncode, "stdout": result.stdout, "stderr": result.stderr})
-        success = all(r["exit_code"] == 0 for r in results)
+        sealed.assert_unchanged({name: (root / name).read_bytes() for name in outputs}, task["execution"])
+        success = bool(results) and all(r["exit_code"] == 0 for r in results)
         return {"success": success, "exit_code": 0 if success else 1,
             "summary": "Synthetic provider with actual local verification", "evidence_refs": task["execution"]["expected_outputs"],
-            "verification": results, "process_started": True, "provider_session_id": "synthetic-fixture",
+            "verification": results, "verification_contract": sealed.receipt(files),
+            "process_started": True, "provider_session_id": "synthetic-fixture",
             "error": "Synthetic verification failed" if not success else None}
 
     def start_runner(self, provider="codex"):

@@ -3,6 +3,14 @@ title: 변경 이력
 description: 프로젝트이음의 브랜드·문서 사이트와 플러그인 기능 변경을 확인합니다.
 ---
 
+## 2.0.0-beta.5 — 검증·보호·관제 품질 개선
+
+2026-11-22. 검증 대상과 반영 파일의 해시 계약, 읽기 전용 코드 검증, 최소 입력·민감정보 보호, 승인 의존성 환경을 적용했습니다. 관제의 실제 실행·실패·제외·검증 출처·부분 사용량 표시와 산출물 받기·모바일 세 가지 뷰를 개선했습니다.
+
+실제 Codex·Claude 생성 경계, FastAPI 격리 스키마 5개·별도 로컬 ASGI 5개, TypeScript 컴파일과 실제 서버 UI를 확인했습니다. Windows 격리의 ASGI 지원 한계와 관측 기반 예산 범위는 [검증 기록](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/main/docs/QUALITY-IMPROVEMENTS.md)에 구분했습니다.
+
+[beta.5 다운로드](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.5)
+
 ## 2.0.0-beta.4 — 관제와 자동 실행 안정화
 
 역할별 실제 활동·워크플로우·작업 지도·타임라인을 제공하고, OS 격리 검증과 실행 복구·입력 무결성·관제 갱신을 강화했습니다. 실제 Codex·Claude 백엔드→QA 자동 실행을 검증했습니다. Windows 독립 검증은 MXC가 필요합니다.

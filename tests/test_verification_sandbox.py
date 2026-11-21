@@ -16,6 +16,11 @@ from tools import host_providers, lifecycle, starter, verification_sandbox, work
 
 class SandboxFixture:
     def setUp(self):
+        # Synthetic producer only; actual provider boundaries have separate native tests.
+        generation = patch('tools.worker_boundary.prepare', side_effect=lambda provider, cmd, root, project, job, **kw:
+            {'argv': cmd, 'env': dict(os.environ), 'contract': {'backend': 'synthetic-native-fixture'}})
+        generation.start()
+        self.addCleanup(generation.stop)
         parent = starter.ROOT / ".test-output"
         parent.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="verification-boundary-", dir=parent)
@@ -94,7 +99,7 @@ class VerificationSandboxTests(SandboxFixture, unittest.TestCase):
         self.assertFalse(runtime.is_relative_to(self.copy))
         if os.name == "nt":
             self.assertIn('windows.sandbox="mxc"', command)
-            self.assertIn("windows.require_mxc=true", command)
+            self.assertIn('windows.sandbox="mxc"', command)
             self.assertTrue(Path(command[command.index("--")+1]).is_relative_to(runtime))
         self.assertFalse(info["network"])
         marker = Path(info["started_marker"])

@@ -132,7 +132,9 @@ export const labels: Record<string, string> = {
   revision_requested: "수정 요청",
 };
 export const completed = (task: Task) =>
-  ["done", "succeeded", "skipped"].includes(task.status);
+  ["done", "succeeded"].includes(task.status);
+export const excluded = (task: Task) => task.status === "skipped";
+export const settled = (task: Task) => completed(task) || excluded(task);
 export const awaiting = (task: Task) =>
   ["awaiting_approval", "awaiting_decision"].includes(task.status);
 export const active = (task: Task) =>
@@ -289,6 +291,7 @@ export function normalise(raw: any): Snapshot {
         "last_seen",
         "run_id",
         "step_id",
+        "verification_status",
       ],
       [
         "requirement_ids",
@@ -300,6 +303,14 @@ export function normalise(raw: any): Snapshot {
       ],
       ["progress", "elapsed_seconds"],
     );
+    if (task.verification != null) {
+      fields(
+        task.verification,
+        ["status", "mode", "reason", "manifest_sha256", "source"],
+        [],
+        ["checks", "passed", "failed"],
+      );
+    }
     if (task.latest_activity != null) events([task.latest_activity]);
     events(list(task, "activity"));
   }
@@ -313,10 +324,26 @@ export function normalise(raw: any): Snapshot {
       throw new Error("스냅샷 산출물 형식이 잘못되었습니다.");
     fields(
       file,
-      ["id", "path", "title", "sha256", "type", "role"],
+      [
+        "id",
+        "path",
+        "title",
+        "sha256",
+        "type",
+        "role",
+        "media_type",
+        "format",
+        "verification_status",
+      ],
       ["task_ids", "requirement_ids"],
       [],
-      ["exists"],
+      [
+        "exists",
+        "downloadable",
+        "download_available",
+        "download_allowed",
+        "previewable",
+      ],
     );
   }
   const agents = list(raw, "agents");
@@ -446,7 +473,23 @@ export function normalise(raw: any): Snapshot {
       ["connected"],
     );
   if (raw.usage != null)
-    fields(raw.usage, [], [], ["tokens", "cost", "cost_usd"]);
+    fields(
+      raw.usage,
+      ["coverage"],
+      [],
+      [
+        "tokens",
+        "cost",
+        "cost_usd",
+        "observed_attempts",
+        "total_attempts",
+        "unreported_attempts",
+        "known_attempts",
+        "unknown_attempts",
+        "known_tokens",
+        "known_cost_usd",
+      ],
+    );
   if (raw.capabilities != null)
     fields(
       raw.capabilities,
@@ -456,7 +499,13 @@ export function normalise(raw: any): Snapshot {
       ["approve", "revision", "host_connected"],
     );
   if (raw.host != null) {
-    fields(raw.host, [], [], [], ["connected", "runner_connected"]);
+    fields(
+      raw.host,
+      ["execution_mode", "latest_activity_at"],
+      [],
+      [],
+      ["connected", "runner_connected", "data_connected"],
+    );
     if (raw.host.supervisor != null)
       fields(
         raw.host.supervisor,
@@ -505,4 +554,81 @@ export function normalise(raw: any): Snapshot {
     },
     capabilities: raw.capabilities || {},
   };
+}
+
+/** Progress counts describe applicable tasks, never estimated effort or hidden work. */
+export function hasIssue(task: Task, snapshot?: Snapshot) {
+  if (active(task) || completed(task) || excluded(task)) return false;
+  const command = (snapshot?.commands || [])
+    .filter((c: any) => c.task_id === task.id)
+    .at(-1);
+  return (
+    ["failed", "stale"].includes(task.status) ||
+    command?.status === "failed" ||
+    (!command && ["failed", "attention"].includes(task.observed_status))
+  );
+}
+export function waiting(task: Task, snapshot?: Snapshot) {
+  return (
+    !active(task) &&
+    !completed(task) &&
+    !excluded(task) &&
+    !hasIssue(task, snapshot)
+  );
+}
+export function taskSummary(tasks: Task[], snapshot?: Snapshot) {
+  const omitted = tasks.filter(excluded).length;
+  const applicable = tasks.length - omitted;
+  const done = tasks.filter(completed).length;
+  return {
+    total: tasks.length,
+    applicable,
+    done,
+    excluded: omitted,
+    active: tasks.filter(active).length,
+    attention: tasks.filter((t) => hasIssue(t, snapshot)).length,
+    waiting: tasks.filter((t) => waiting(t, snapshot)).length,
+    percent: applicable ? Math.round((done / applicable) * 100) : null,
+  };
+}
+export function verificationOf(task: Task) {
+  const value = task.verification?.status || task.verification_status;
+  if (excluded(task)) return { state: "excluded", label: "검증 집계 제외" };
+  if (task.status === "stale")
+    return { state: "unknown", label: "검증 기준 변경" };
+  if (value === "passed") {
+    if (typeof task.verification?.checks !== "number" || task.verification.checks <= 0)
+      return { state: "unknown", label: "검증 근거 미보고" };
+    if (task.verification.source === "supervisor")
+      return { state: "passed", label: "등록 검증 통과" };
+    if (task.verification.source === "host-reported")
+      return { state: "host_reported", label: "호스트 검증 보고" };
+    return { state: "unknown", label: "검증 출처 미보고" };
+  }
+  if (["failed", "integrity_failed"].includes(value))
+    return { state: "failed", label: "검증 실패" };
+  if (
+    ["artefact_only", "artifact_only"].includes(value) ||
+    ["artifact_only", "artefact_only"].includes(task.verification?.mode)
+  )
+    return { state: "artefact_only", label: "파일 검수 · 실행검사 없음" };
+  if (["not_run", "unverified"].includes(value))
+    return { state: "not_run", label: "실행 검증 안 함" };
+  return { state: "unknown", label: "검증 미보고" };
+}
+export function usageCoverage(snapshot: Snapshot) {
+  const usage = snapshot.usage;
+  const missing = usage.unreported_attempts ?? usage.unknown_attempts;
+  if (
+    usage.coverage === "partial" ||
+    (typeof missing === "number" && missing > 0)
+  )
+    return `관측 합계 · 미집계 ${typeof missing === "number" ? missing + "회" : "있음"}`;
+  if (
+    usage.coverage === "unknown" ||
+    (usage.tokens == null && usage.cost == null)
+  )
+    return "사용량 미집계";
+  if (usage.coverage === "known") return "보고된 실행 사용량";
+  return "관측 합계 · 수집 범위 미보고";
 }

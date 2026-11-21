@@ -5,6 +5,7 @@ import {
   labels,
   phaseOf,
   completed,
+  excluded,
   active,
   normalise,
   type Snapshot,
@@ -14,7 +15,17 @@ import {
 import { makeDemo, tickDemo, demoDiff } from "./simulation";
 import { LatestRequest, isSnapshotBusy } from "./request-state";
 import { WorkspaceBoundary } from "./WorkspaceBoundary";
-import { Observer, ActivityFeed, activityOf, taskIsLive } from "./Observer";
+import { taskSummary, hasIssue, waiting, usageCoverage } from "./model";
+import { VerificationBadge } from "./VerificationBadge";
+import { ArtefactDelivery } from "./ArtefactDelivery";
+import "./quality-observer.css";
+import {
+  Observer,
+  ActivityFeed,
+  activityOf,
+  taskIsLive,
+  freshAgent,
+} from "./Observer";
 import {
   Workflow,
   KnowledgeMap,
@@ -94,6 +105,7 @@ function WorkspaceContent({
   const [connectionMode, setConnectionMode] = useState("");
   const tokenRef = useRef("");
   const importRef = useRef<HTMLInputElement>(null);
+  const selectionOpener = useRef<HTMLElement | null>(null);
   const snapshotRef = useRef<Snapshot | null>(null);
   const modeRef = useRef("demo");
   const snapshotRequest = useRef(new LatestRequest());
@@ -133,7 +145,9 @@ function WorkspaceContent({
           'button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),a[href],[tabindex="0"]',
         ),
       ).filter((element) => element.offsetParent !== null);
-    const frame = requestAnimationFrame(() => targets()[0]?.focus());
+    const frame = requestAnimationFrame(() => {
+      if (!panel?.contains(document.activeElement)) targets()[0]?.focus();
+    });
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -178,7 +192,9 @@ function WorkspaceContent({
           'button:not([disabled]),a[href],[tabindex="0"]',
         ) || [],
       ).filter((e) => e.offsetParent !== null);
-    const frame = requestAnimationFrame(() => targets()[0]?.focus());
+    const frame = requestAnimationFrame(() => {
+      if (!panel?.contains(document.activeElement)) targets()[0]?.focus();
+    });
     const handle = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -339,11 +355,13 @@ function WorkspaceContent({
           (phaseFilter === "all" || phaseOf(t) === phaseFilter) &&
           (roleFilter === "all" || t.role === roleFilter) &&
           (statusFilter === "all" ||
-            (statusFilter === "waiting" && !active(t) && !completed(t)) ||
+            (statusFilter === "waiting" && waiting(t, snapshot!)) ||
             (statusFilter === "active" && active(t)) ||
             (statusFilter === "blocked" &&
               ["blocked", "failed", "stale"].includes(t.status)) ||
-            (statusFilter === "done" && completed(t))) &&
+            (statusFilter === "done" && completed(t)) ||
+            (statusFilter === "excluded" && excluded(t)) ||
+            (statusFilter === "failed" && hasIssue(t, snapshot!))) &&
           (!query ||
             `${t.id} ${t.title} ${t.role} ${ROLE[t.role] || ""}`
               .toLowerCase()
@@ -494,6 +512,8 @@ function WorkspaceContent({
     };
   }, [filePath, selectedFileHash, gateHashKey, mode, diffRetry]);
   const select = (s: Selection) => {
+    const current = document.activeElement as HTMLElement | null;
+    if (!current?.closest(".inspector")) selectionOpener.current = current;
     setSelection(s);
     setInspectTab(s.kind === "artefact" ? "diff" : "activity");
     setNotice("");
@@ -559,8 +579,9 @@ function WorkspaceContent({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
-  const count = snapshot?.tasks.length || 0;
-  const done = snapshot?.tasks.filter(completed).length || 0;
+  const counts = taskSummary(snapshot?.tasks || [], snapshot || undefined);
+  const count = counts.total;
+  const done = counts.done;
   const running = snapshot
     ? snapshot.tasks.filter(
         (task) => connected && taskIsLive(snapshot, task, now, mode),
@@ -570,6 +591,14 @@ function WorkspaceContent({
   const currentRunner =
     runners.find((r) => connected && r.connected) || runners.at(-1);
   const supervisor = snapshot?.host?.supervisor;
+  const providerIsLive = (provider: string) =>
+    mode === "local" &&
+    connected &&
+    (runners.some((r) => r.provider === provider && r.connected) ||
+      (snapshot?.agents || []).some(
+        (a) => a.provider === provider && freshAgent(a, now),
+      ));
+
   const supervisorNotice =
     mode === "local" &&
     connected &&
@@ -582,7 +611,11 @@ function WorkspaceContent({
           : `자동 실행기가 ${supervisor.status === "failed" ? "시작되지 않았습니다" : "중지되었습니다"}. ${supervisor.last_error || "현재 AI 대화에서 실행기 연결 상태를 확인해 주세요."}`
       : "";
   const runnerProvider =
-    currentRunner?.provider === "claude" ? "Claude Code" : "Codex";
+    currentRunner?.provider === "claude"
+      ? "Claude Code"
+      : currentRunner?.provider === "codex"
+        ? "Codex"
+        : "호스트 미보고";
   const runnerStates: Record<string, string> = {
     starting: "연결 중",
     waiting: "자동 실행 대기",
@@ -602,7 +635,28 @@ function WorkspaceContent({
         : currentRunner
           ? `${runnerProvider} · ${runnerStates[currentRunner.status] || currentRunner.status}`
           : "자동 실행기 미연결";
-  const progress = count ? Math.round((done / count) * 100) : 0;
+  const progress = counts.percent;
+  const cliMode =
+    snapshot?.host?.execution_mode === "cli" ||
+    snapshot?.host?.execution_mode === "mixed" ||
+    (!snapshot?.host?.execution_mode &&
+      Boolean(supervisor?.configured || currentRunner));
+  const executionMode =
+    mode === "demo"
+      ? "시뮬레이션"
+      : mode === "snapshot"
+        ? "저장된 실행 기록"
+        : snapshot?.host?.execution_mode === "mixed"
+          ? "호스트 보고 + 별도 CLI"
+          : snapshot?.host?.execution_mode === "unconnected"
+            ? "실행 연결 미보고"
+            : cliMode
+              ? "별도 CLI 실행기"
+              : "현재 호스트의 활동 보고";
+  const lastActivity = snapshot ? activityOf(snapshot).at(-1) : undefined;
+  const usageNote = snapshot ? usageCoverage(snapshot) : "사용량 미집계";
+  const observedTokens = snapshot?.usage.tokens ?? snapshot?.usage.known_tokens;
+  const observedCost = snapshot?.usage.cost ?? snapshot?.usage.known_cost_usd;
   const title =
     selectedArtefact?.path ||
     selectedAgent?.name ||
@@ -652,7 +706,7 @@ function WorkspaceContent({
             <option value="all">모든 상태</option>
             <option value="active">진행 중</option>
             <option value="waiting">대기 중</option>
-            <option value="blocked">확인 필요</option>
+            <option value="blocked">조건 대기·재검토</option>
             <option value="done">완료</option>
           </select>
           <select
@@ -820,19 +874,14 @@ function WorkspaceContent({
                   {provider === "claude" ? "Claude Code" : "Codex"}
                 </strong>
                 <span
-                  className={`host-dot ${mode === "local" && connected && runners.some((r) => r.provider === provider && r.connected) ? "connected" : ""}`}
+                  className={`host-dot ${providerIsLive(provider) ? "connected" : ""}`}
                 />
                 <small>
                   {mode === "demo"
                     ? "예시"
                     : mode === "snapshot"
                       ? "기록"
-                      : runners.some(
-                            (r) =>
-                              connected &&
-                              r.provider === provider &&
-                              r.connected,
-                          )
+                      : providerIsLive(provider)
                         ? "연결됨"
                         : "보고 기록"}
                 </small>
@@ -975,39 +1024,94 @@ function WorkspaceContent({
           </div>
           <div
             className="overall-progress"
-            aria-label={`전체 ${count}개 중 ${done}개 완료`}
+            aria-label={`적용 대상 ${counts.applicable}개 중 ${done}개 완료 · 적용 제외 ${counts.excluded}개`}
           >
             <div>
               <strong>
-                {done} / {count} 완료
+                {counts.applicable
+                  ? `${done} / ${counts.applicable} 완료`
+                  : "적용 대상 없음"}
               </strong>
               <b>
-                {progress}
-                <small>%</small>
+                {progress == null ? "—" : progress}
+                {progress != null && <small>%</small>}
               </b>
             </div>
-            <div
-              role="progressbar"
-              aria-label="전체 유효 완료 작업"
-              aria-valuenow={progress}
-              aria-valuemin={0}
-              aria-valuemax={100}
-            >
-              <i style={{ width: `${progress}%` }} />
-            </div>
+            {progress != null && (
+              <div
+                role="progressbar"
+                aria-label="적용 대상 작업 완료 비율"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <i style={{ width: `${progress}%` }} />
+              </div>
+            )}
             <small>
-              <span>{running} 진행 중</span>
+              <span>{counts.active} 진행 중</span>
               <span>·</span>
-              <span>
-                {snapshot?.tasks.filter((t) => !active(t) && !completed(t))
-                  .length || 0}{" "}
-                대기
+              <span>{counts.waiting} 대기</span>
+              <span>·</span>
+              <span className={counts.attention ? "has-attention" : ""}>
+                {counts.attention} 확인 필요
               </span>
+              <span>·</span>
+              <span>{counts.excluded} 적용 제외</span>
               {snapshot?.tasks.some(
                 (t) => active(t) && !taskIsLive(snapshot, t, now, mode),
               ) && <span>· 활동 확인 필요</span>}
             </small>
           </div>
+        </div>
+        <div className="execution-hud" aria-label="데이터와 실제 실행 상태">
+          <div>
+            <span>실행 방식</span>
+            <strong>{executionMode}</strong>
+            <small>
+              {mode === "local"
+                ? cliMode
+                  ? runnerText
+                  : "이 관제에 전달된 호스트 활동만 표시"
+                : "실제 실행기에 연결되지 않음"}
+            </small>
+          </div>
+          <div>
+            <span>실제 작업</span>
+            <strong>
+              {mode === "snapshot"
+                ? "스냅샷 시점의 기록"
+                : mode === "demo"
+                  ? "합성 시나리오"
+                  : running
+                    ? `${running}개 작업에서 실제 활동 보고`
+                    : counts.active
+                      ? "진행 기록의 활동 확인 필요"
+                      : counts.attention
+                        ? `${counts.attention}개 작업 확인 필요`
+                        : "보고된 실행 작업 없음"}
+            </strong>
+            <small>
+              {lastActivity?.at || snapshot?.host?.latest_activity_at
+                ? `마지막 행동 ${prettyTime(lastActivity?.at || snapshot?.host?.latest_activity_at)}`
+                : "행동 시각 미보고"}
+            </small>
+          </div>
+          <div>
+            <span>관측 리소스</span>
+            <strong>
+              {observedTokens != null
+                ? `${Number(observedTokens).toLocaleString()} tokens`
+                : "토큰 미집계"}
+              {observedCost != null ? ` · $${observedCost}` : ""}
+            </strong>
+            <small>{usageNote}</small>
+          </div>
+          <p>
+            {progress == null
+              ? "적용 대상 작업 없음"
+              : "작업 개수 기준 완료율 · 공수·일정·품질 진척률이 아닙니다."}
+          </p>
         </div>
       </div>
       {(tab === "artifacts" ||
@@ -1063,6 +1167,14 @@ function WorkspaceContent({
                       <span>
                         <strong>{a.path.split("/").at(-1)}</strong>
                         <small className="mono">{a.path}</small>
+                        <small className="artifact-kind">
+                          {artefactKind(a.path)} ·{" "}
+                          {a.exists === false
+                            ? "파일 없음"
+                            : a.sha256
+                              ? "현재 버전 등록"
+                              : "버전 미확인"}
+                        </small>
                       </span>
                       <span className="artifact-hash mono">
                         {a.sha256 ? a.sha256.slice(0, 10) : "해시 미보고"}
@@ -1153,6 +1265,13 @@ function WorkspaceContent({
               aria-label="상세 패널 닫기"
             />
             <aside
+              onKeyDown={(event) => {
+                if (event.key === "Escape" && !isMobile && !wideDiff) {
+                  event.preventDefault();
+                  setSelection(null);
+                  requestAnimationFrame(() => selectionOpener.current?.focus());
+                }
+              }}
               className="inspector"
               aria-label="작업 상세"
               role={isMobile ? "dialog" : undefined}
@@ -1221,10 +1340,37 @@ function WorkspaceContent({
                 {inspectTabs.map(([id, label]) => (
                   <button
                     key={id}
+                    id={`inspector-tab-${id}`}
                     role="tab"
+                    tabIndex={inspectTab === id ? 0 : -1}
                     aria-selected={inspectTab === id}
                     aria-controls="inspector-content"
                     onClick={() => setInspectTab(id)}
+                    onKeyDown={(event) => {
+                      if (
+                        !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
+                          event.key,
+                        )
+                      )
+                        return;
+                      event.preventDefault();
+                      const current = inspectTabs.findIndex(
+                        ([key]) => key === id,
+                      );
+                      const next =
+                        event.key === "Home"
+                          ? 0
+                          : event.key === "End"
+                            ? inspectTabs.length - 1
+                            : (current +
+                                (event.key === "ArrowRight" ? 1 : -1) +
+                                inspectTabs.length) %
+                              inspectTabs.length;
+                      setInspectTab(inspectTabs[next][0]);
+                      document
+                        .getElementById(`inspector-tab-${inspectTabs[next][0]}`)
+                        ?.focus();
+                    }}
                     className={inspectTab === id ? "active" : ""}
                   >
                     {label}
@@ -1235,6 +1381,8 @@ function WorkspaceContent({
                 className="inspector-content"
                 id="inspector-content"
                 role="tabpanel"
+                aria-labelledby={`inspector-tab-${inspectTab}`}
+                tabIndex={0}
               >
                 {relatedTasks.length > 1 && (
                   <div className="info-box">
@@ -1263,6 +1411,7 @@ function WorkspaceContent({
                         }
                       </span>
                     </div>
+                    {task && <VerificationBadge task={task} />}
                     {task && (
                       <div className="info-box">
                         <p>
@@ -1298,6 +1447,11 @@ function WorkspaceContent({
                         <div className="section-label">
                           검토 대상 산출물 <span>{artefacts.length}</span>
                         </div>
+                        <ArtefactDelivery
+                          file={artefacts.find((a) => a.path === filePath)}
+                          mode={mode}
+                          token={tokenRef.current}
+                        />
                         <select
                           className="artifact-select"
                           value={filePath}
@@ -1492,20 +1646,19 @@ function WorkspaceContent({
                     </section>
                     <section className="inspector-section">
                       <h3>수집된 리소스</h3>
+                      <p className="fine-print">{usageNote}</p>
                       <Resource
-                        label="전체 토큰"
+                        label="관측 토큰"
                         value={
-                          snapshot.usage.tokens != null
-                            ? Number(snapshot.usage.tokens).toLocaleString()
+                          observedTokens != null
+                            ? Number(observedTokens).toLocaleString()
                             : "미집계"
                         }
                       />
                       <Resource
-                        label="전체 API 비용"
+                        label="관측 API 비용"
                         value={
-                          snapshot.usage.cost != null
-                            ? `$${snapshot.usage.cost}`
-                            : "미집계"
+                          observedCost != null ? `$${observedCost}` : "미집계"
                         }
                       />
                     </section>
@@ -1720,4 +1873,13 @@ function DiffContent({ diff }: { diff: any }) {
       </code>
     </pre>
   );
+}
+
+function artefactKind(path: string) {
+  const ext = path.split(".").at(-1)?.toLowerCase();
+  if (["docx", "pptx", "hwpx", "xlsx"].includes(ext || "")) return "편집 원본";
+  if (ext === "pdf") return "PDF 출력";
+  if (["png", "jpg", "jpeg", "webp"].includes(ext || ""))
+    return "페이지·이미지";
+  return "산출물·근거";
 }

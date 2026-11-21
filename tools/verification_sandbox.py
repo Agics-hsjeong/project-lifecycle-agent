@@ -79,14 +79,16 @@ def _linux_sandbox_executable(launcher, *, machine=None):
     raise SandboxUnavailable('Linux Codex 플랫폼 패키지의 실행 파일을 찾지 못했습니다.')
 
 
-def _filesystem_rules(root, project, runtime, selected, *, platform=None):
+def _filesystem_rules(root, project, runtime, selected, *, platform=None, readonly=False, read_paths=()):
     platform = sys.platform if platform is None else platform
     # Bubblewrap starts from an empty, default-denied filesystem. Redundant
     # nested deny mounts below its read-only ancestor masks can fail during
     # setup. Expose only the copy and public runtime there; keep explicit
     # home/project denies on the native Windows and macOS backends.
     filesystem = {':root': 'deny', ':minimal': 'read',
-                  root.as_posix(): 'write', runtime.as_posix(): 'read'}
+                  root.as_posix(): 'read' if readonly else 'write', runtime.as_posix(): 'read'}
+    if readonly:
+        filesystem[(root / INTERNAL / 'tmp').as_posix()] = 'write'
     if not platform.startswith('linux'):
         filesystem[Path.home().as_posix()] = 'deny'
         filesystem[project.as_posix()] = 'deny'
@@ -98,10 +100,17 @@ def _filesystem_rules(root, project, runtime, selected, *, platform=None):
                 raise SandboxUnavailable('원본 프로젝트가 검증 인터프리터의 읽기 범위 안에 있습니다. 분리된 검증 런타임을 준비하세요.')
             filesystem[readable.as_posix()] = 'read'
     filesystem[selected.as_posix()] = 'read'
+    for value in read_paths:
+        readable = Path(value).resolve()
+        if readable == Path.home().resolve() or project == readable or project.is_relative_to(readable) or readable.is_relative_to(project):
+            raise SandboxUnavailable('의존성 읽기 권한은 원본 프로젝트나 사용자 홈을 노출할 수 없습니다.')
+        if not readable.exists():
+            raise SandboxUnavailable('준비된 검증 의존성 경로가 없습니다.')
+        filesystem[readable.as_posix()] = 'read'
     return filesystem
 
 
-def prepare(argv, root, project, *, executable=None):
+def prepare(argv, root, project, *, executable=None, readonly=False, read_paths=(), environment=None):
     """The returned command writes only its copy. There is deliberately no unsafe fallback."""
     from tools.host_providers import executable_argv
     root, project = Path(root).resolve(), Path(project).resolve()
@@ -126,14 +135,14 @@ def prepare(argv, root, project, *, executable=None):
         selected = Path(shutil.which(args[0]) or args[0]).resolve()
         if selected.is_relative_to(project):
             raise SandboxUnavailable('검증 실행 파일은 원본 프로젝트 안에서 직접 실행하지 않습니다. 사본의 검증 런타임을 준비하세요.')
-        marker = confined(root, INTERNAL + '/started-' + uuid.uuid4().hex)
+        marker = confined(root, INTERNAL + '/tmp/started-' + uuid.uuid4().hex)
         entrypoint = runtime / 'entrypoint.py'
         entrypoint.write_text(
             'import json,subprocess,sys\nfrom pathlib import Path\n'
             'Path(sys.argv[1]).write_text("started",encoding="utf-8")\n'
             'raise SystemExit(subprocess.call(json.loads(sys.argv[2])))\n', encoding='utf-8')
         sandbox_args = [verifier_python, str(entrypoint), str(marker), json.dumps(args, ensure_ascii=False)]
-        filesystem = _filesystem_rules(root, project, runtime, selected)
+        filesystem = _filesystem_rules(root, project, runtime, selected, readonly=readonly, read_paths=read_paths)
         if sys.platform.startswith('linux'):
             broker = _linux_sandbox_executable(launcher)
             if broker.is_relative_to(project):
@@ -141,10 +150,26 @@ def prepare(argv, root, project, *, executable=None):
             filesystem[broker.as_posix()] = 'read'
         profile = 'permissions.ieum-verification={filesystem={' + ','.join(
             json.dumps(k, ensure_ascii=False) + '=' + json.dumps(v) for k, v in filesystem.items()) + '},network={enabled=false}}'
-        settings = ['-c', 'windows.sandbox="mxc"', '-c', 'windows.require_mxc=true'] if os.name == 'nt' else []
+        settings = ['-c', 'windows.sandbox="mxc"'] if os.name == 'nt' else []
         command = launcher + settings + ['sandbox', '--include-managed-config', '--permission-profile', 'ieum-verification', '-c', profile,
                                          '-C', str(root), '--'] + sandbox_args
-        return command, safe_environment(root), {'backend': 'codex-sandbox-mxc' if os.name == 'nt' else 'codex-sandbox', 'network': False, 'write_root': str(root), 'started_marker': str(marker), 'runtime_root': str(runtime)}
+        actual_environment = safe_environment(root)
+        if environment is not None:
+            if not isinstance(environment, dict) or any(not isinstance(k, str) or not isinstance(v, str) or '\0' in v for k, v in environment.items()):
+                raise SandboxUnavailable('검증 환경 변수는 신뢰된 문자열 계약이어야 합니다.')
+            extras = {'PYTHONPATH', 'NODE_PATH', 'NODE_OPTIONS', 'NPM_CONFIG_CACHE', 'PLAYWRIGHT_BROWSERS_PATH',
+                      'PYTHONPYCACHEPREFIX', 'XDG_CACHE_HOME', 'IEUM_VERIFICATION_SCRATCH', 'PLAYWRIGHT_EXECUTABLE_PATH',
+                      'NPM_CONFIG_IGNORE_SCRIPTS', 'NPM_CONFIG_UPDATE_NOTIFIER', 'NPM_CONFIG_AUDIT', 'NPM_CONFIG_FUND'}
+            for key, value in environment.items():
+                if key.upper() in SAFE_ENV | extras:
+                    actual_environment[key] = value
+        # No caller can redirect verifier writes to the host temp/home directory.
+        temporary = root / INTERNAL / 'tmp'
+        actual_environment.update(TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
+            IEUM_VERIFICATION_SCRATCH=str(temporary), PYTHONDONTWRITEBYTECODE='1')
+        return command, actual_environment, {'backend': 'codex-sandbox-mxc' if os.name == 'nt' else 'codex-sandbox',
+            'network': False, 'source_readonly': readonly, 'write_root': str(temporary if readonly else root),
+            'started_marker': str(marker), 'runtime_root': str(runtime)}
     except BaseException:
         try:
             cleanup({'runtime_root': str(runtime)})
@@ -159,7 +184,8 @@ def safe_environment(root):
     temporary.mkdir(parents=True, exist_ok=True)
     environment = {k: v for k, v in os.environ.items() if k.upper() in SAFE_ENV}
     environment.update(TEMP=str(temporary), TMP=str(temporary), TMPDIR=str(temporary),
-                       PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1', PYTHONIOENCODING='utf-8')
+                       PYTHONDONTWRITEBYTECODE='1', PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
+                       IEUM_VERIFICATION_SCRATCH=str(temporary))
     return environment
 
 

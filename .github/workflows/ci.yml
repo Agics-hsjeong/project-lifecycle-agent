@@ -73,3 +73,11 @@ jobs:
         run: python -m unittest discover -s tests -p test_verification_sandbox.py -v
         env:
           PYTHONUTF8: '1'
+      - name: Read-only candidate integrity regressions
+        run: python -m unittest discover -s tests -p test_verification_integrity.py -v
+        env:
+          PYTHONUTF8: '1'
+      - name: Approved dependency runtime regressions
+        run: python -m unittest discover -s tests -p test_verification_runtime.py -v
+        env:
+          PYTHONUTF8: '1'

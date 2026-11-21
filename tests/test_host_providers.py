@@ -54,6 +54,11 @@ else:
 
 class HostProviderTests(unittest.TestCase):
     def setUp(self):
+        # Synthetic producer only; actual provider boundaries have separate native tests.
+        generation = patch('tools.worker_boundary.prepare', side_effect=lambda provider, cmd, root, project, job, **kw:
+            {'argv': cmd, 'env': dict(os.environ), 'contract': {'backend': 'synthetic-native-fixture'}})
+        generation.start()
+        self.addCleanup(generation.stop)
         base = starter.ROOT / ".test-output"
         base.mkdir(exist_ok=True)
         self.temporary = tempfile.TemporaryDirectory(prefix="provider-independent-", dir=base)

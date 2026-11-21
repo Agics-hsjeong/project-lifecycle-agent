@@ -139,7 +139,7 @@ class ExecutionMetadataTests(unittest.TestCase):
         result = workspace.host_event(self.root, {**base, "expected_revision": self.rev(), "kind": "failed", "command_id": command_id,
             "notes": "Input changed; no completion was accepted"})
         self.assertEqual(result["command"]["status"], "failed")
-        self.assertEqual(next(t for t in result["snapshot"]["tasks"] if t["id"] == "TASK-002")["status"], "blocked")
+        self.assertEqual(next(t for t in result["snapshot"]["tasks"] if t["id"] == "TASK-002")["status"], "failed")
 
     def test_local_server_stops_its_owned_runner_with_server_lifecycle(self):
         observed = {}

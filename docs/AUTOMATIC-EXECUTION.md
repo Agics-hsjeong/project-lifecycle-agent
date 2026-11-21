@@ -71,8 +71,44 @@ CLI에는 기존 로그인과 실제 사용 한도가 적용된다. 컴퓨터와
 
 모델과 검증 명령의 전체 프로세스 트리를 소유한다. Windows는 시작 전 Job Object에 연결하고 정상 종료·중지·시간 초과 시 남은 자식도 정리한다. 입력 pipe 전송도 같은 중단·제한 시간 안에서 감시한다. 종료됐지만 핸들이 남은 프로세스를 실행 중으로 오인하지 않는다.
 
-독립 검증은 Codex sandbox CLI를 로컬 격리 도구로 사용한다. 모델 API나 Codex 모델 인증을 사용하는 검증이 아니다. 실행기 provider가 Claude여도 이 검증 도구는 별도로 필요하다. `--verification-executable`로 CLI 실행 파일 또는 JavaScript 경로를 연결할 수 있다. Windows는 MXC를 요구하며 읽기 기본 거부·최소 런타임 읽기·작업 사본 쓰기·네트워크 차단을 적용한다. 호스트 관리 정책을 포함하고 사용할 수 없으면 실패로 표시한다. 비격리 fallback은 없다.
+독립 검증은 Codex sandbox CLI를 로컬 격리 도구로 사용한다. 모델 API나 Codex 모델 인증을 사용하는 검증이 아니다. 실행기 provider가 Claude여도 이 검증 도구는 별도로 필요하다. `--verification-executable`로 CLI 실행 파일 또는 JavaScript 경로를 연결할 수 있다. Windows는 MXC를 요구하며 읽기 기본 거부·최소 런타임 읽기·검증 소스 읽기 전용·전용 scratch 쓰기·네트워크 차단을 적용한다. 호스트 관리 정책을 포함하고 사용할 수 없으면 실패로 표시한다. 비격리 fallback은 없다.
 
 Windows의 사용자 전용 Python ACL을 바꾸지 않는다. 공개 Python 실행 파일·표준 라이브러리·라이선스를 작업별 감독 런타임에 복사하고 사본 밖의 읽기 전용 경로로 연결한다. 설치된 site-packages·자격 증명은 복사하지 않는다. 외부 라이브러리나 네트워크가 필요한 검증은 신뢰하는 런타임과 정책을 준비해야 하며 이 기본 검증 범위로 성공을 보장하지 않는다. 환경 변수는 운영체제·실행에 필요한 경로만 전달한다.
 
 검증용 공개 런타임은 긴 작업 경로에서도 Windows 실행 파일 경로 제한에 걸리지 않도록 짧은 소유 OS 임시 경로에 만들며, 작업 사본 밖 읽기 전용으로 연결한다. 검증 후에는 소유 경로·링크 여부를 확인해 이 런타임만 정리한다. 모델이 작성한 산출물은 기존 고객 밖 작업 사본에 그대로 보존한다.
+
+
+## 강화된 검증과 관찰 — 2.0.0-beta.5
+
+사용자는 Codex·Claude Code 대화에서 목표를 요청합니다. 에이전트가 필요한 역할, 선행 조건, 허용 파일과 검증 명령을 준비합니다. 관제에서 매 작업을 승인하거나 JSON을 입력할 필요는 없습니다. 실제 고객 결정·외부 제출은 대화에서 확인합니다. 기존 프로젝트에 사람이 설정한 게이트는 자동으로 삭제하지 않습니다.
+
+코드 작업의 `verification_commands`는 비어 있을 수 없습니다. 감독자는 작업 컨텍스트·입력·검증 계획·후보 파일을 해시로 결속한 뒤 소스를 읽기 전용으로 검증합니다. 검증 뒤 바뀐 파일은 반영하지 않으며 검증한 고정 바이트만 전달합니다. `passed`는 등록된 검사의 성공을 뜻하며 모든 결함이 없다는 보증이 아닙니다. 문서만 만드는 작업은 `verification_mode: artifact_only`와 사유를 명시하며 코드 실행 검증 성공과 구분합니다.
+
+`execution.input_paths`로 필요한 입력만 지정합니다. 미지정이면 작업의 입력·담당 파일·알려진 빌드 메타데이터를 추론하여 제한하며 프로젝트 전체를 복사하지 않습니다. 비밀 파일명과 탐지 가능한 자격 증명 내용은 복사·관제·산출물 다운로드에서 차단합니다. 생성 작업자도 프로젝트 밖 파일을 읽거나 쓰지 못하도록 제한합니다. Claude 생성 작업자는 실제 검증한 Claude Code 2.1.327 이상을 요구하며, 지원하지 않는 버전은 시작 전에 차단합니다. 이 탐지는 임의의 모든 민감정보를 식별하는 DLP 보증은 아닙니다. 원시 CLI 로그와 사본은 비공개 로컬 런타임으로 취급합니다.
+
+### 실제 의존성을 사용하는 프로젝트
+
+FastAPI·pytest·TypeScript 등 외부 의존성은 신뢰하는 환경에서 lockfile에 맞게 설치한 뒤 감독자가 등록합니다. 모델이 임의의 설치 스크립트를 검증 환경에서 실행하지 않습니다. 다음 명령은 사용자가 매번 입력하는 절차가 아니라 에이전트·운영자가 환경을 준비할 때 사용하는 인터페이스입니다.
+
+```text
+python -m tools.verification_runtime PROJECT --kind python --lockfile requirements.lock --packages APPROVED_SITE_PACKAGES
+python -m tools.verification_runtime PROJECT --kind node --lockfile package-lock.json --packages APPROVED_NODE_MODULES --node NODE_EXECUTABLE --npm APPROVED_NPM_DIRECTORY
+```
+
+결과의 `runtime_ref`를 작업의 `execution.runtime_ref`에 연결합니다. 원본·후보 lockfile SHA와 등록 환경의 전체 파일 해시가 일치해야 합니다. 환경이 없거나 달라졌으면 모델에게 코드를 계속 고치게 하지 않고 환경 오류로 끝냅니다. Python 검증은 호스트 site-packages를 상속하지 않습니다. npm은 등록된 `run`·`test`만 사용하며 설치·네트워크 다운로드를 허용하지 않습니다. 소스는 읽기 전용이므로 빌드 산출물·캐시는 검증 scratch에 쓰도록 명령을 준비합니다. 등록 환경은 OS·아키텍처·Python 버전에 종속됩니다. Windows의 네트워크 차단 격리에서는 asyncio가 내부 TCP 채널을 사용하는 ASGI TestClient 검증을 지원하지 않습니다. 승인 Python 런타임은 이를 빠르게 환경 오류로 종료하며 코드 수정 루프로 넘기지 않습니다. API 스키마·순수 로직은 격리 검증하고, ASGI 통합은 별도 신뢰 환경에서 실행하여 그 범위를 명시합니다. 실제 HTTP 테스트를 실행하지 않고 통과로 기록하지 않습니다.
+
+### 관제에서 확인할 것
+
+- 데이터 연결, 현재 앱의 native 역할 실행, 별도 CLI 실행기를 구분합니다. 실제 heartbeat가 없는 연결을 실행 중이라고 표시하지 않습니다.
+- 완료·진행·대기·차단·실패·제외를 별도로 셉니다. 제외는 완료가 아니며 적용 대상 분모에서 빠집니다. 임의의 모델 진행률은 만들지 않습니다.
+- 검증 배지는 등록 검사 성공·문서 전용·미검증·실패·변경됨을 구분합니다.
+- 사용량은 알려진 합계와 미보고 실행 수를 함께 표시합니다. 일부 보고만 받은 값을 전체 비용으로 표시하지 않습니다.
+- 산출물은 등록된 파일 ID와 현재 SHA가 맞을 때만 인증된 로컬 경로로 받습니다. PDF·PNG·JPEG만 제한된 미리보기를 제공하며 HTML·SVG는 인라인 실행하지 않습니다.
+
+`policy.limits`는 `max_tokens`, `max_cost_usd`, `max_seconds`, `unknown_usage: stop|warn`을 지원합니다. 토큰·비용은 보고 시점의 관측값으로 다음 작업 시작을 제한하므로 한 모델 요청의 청구 상한을 강제하는 기능은 아닙니다. 시간 제한은 모델·검증 전체의 누적 경과 시간에 적용합니다.
+
+### 출력물 렌더링과 비공개 런타임 정리
+
+`python -m tools.artifact_renderer PROJECT --pdf exports/result.pdf --source exports/result.docx`는 설치된 신뢰 가능한 Poppler로 PDF 전체 페이지를 PNG로 렌더링하고 파일·도구 해시를 기록합니다. 원본 DOCX/PPTX에서 PDF로 변환한 계보가 사용자 제공이면 `host_supplied_unverified`로 남습니다. 렌더링 사실과 내용·디자인 검수 주장을 혼동하지 않습니다. `artifact-review`의 `require_render_provenance:true`로 렌더 영수증이 필요한 검수를 지정할 수 있습니다.
+
+`python -m tools.runtime_retention --help`로 비공개 작업 사본·원시 로그의 보존 정리를 준비할 수 있습니다. 기본은 미리보기이며 저장한 계획의 명시 적용만 삭제합니다. 실행 중인 큐·lease·프로세스, 바뀐 계획, 외부 링크는 거부합니다. 고객 원본·완성 산출물·프로젝트 이력·구조화 영수증·승인 의존성 캐시는 정리하지 않습니다. 자동 삭제는 기본으로 활성화되지 않습니다.

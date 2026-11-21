@@ -3,8 +3,10 @@
 No API keys, permission bypass, shell strings, or model-asserted test success.
 """
 from datetime import datetime, timezone
+import ast
 import hashlib
 import json
+import math
 import os
 import re
 from pathlib import Path
@@ -15,7 +17,7 @@ import sys
 import time
 import threading
 
-from tools.storage import confined, digest, json_bytes, lock, commit
+from tools.storage import atomic_write, confined, digest, json_bytes, lock, commit
 from tools.process_tree import ProcessTree
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +28,9 @@ SCHEMA = {"type": "object", "additionalProperties": False,
 SKIP_DIRS = {".git", ".agents", ".codex", ".claude", ".aws", ".ssh", "node_modules", ".venv", "venv", "__pycache__", ".pytest_cache", ".ieum-verification"}
 PROTECTED = {"project.json", "HANDOFF.md", "AGENTS.md", "CLAUDE.md"}
 MAX_FILES, MAX_BYTES = 10000, 128 * 1024 * 1024
+MAX_NATIVE_BYTES = 16 * 1024 * 1024
+DOCUMENT_SUFFIXES = {'.md', '.txt', '.rst', '.pdf', '.docx', '.pptx', '.xlsx', '.csv', '.svg', '.png',
+                     '.jpg', '.jpeg', '.webp', '.gif', '.avif', '.hwp', '.hwpx', '.drawio', '.odt', '.odp', '.ods'}
 
 
 class ProviderError(ValueError):
@@ -62,10 +67,13 @@ def executable_argv(provider, executable=None):
 
 
 def _secret(relative):
-    return any(part.casefold().startswith('.env') or part.casefold() in {'.netrc', '.npmrc', '.pypirc', '.mcp.json', '.claude.json'} for part in Path(relative).parts)
+    from tools.sensitive_data import is_sensitive_path
+    return is_sensitive_path(relative)
 
 
-def _files(folder):
+def _files(folder, roots=None, *, reject_sensitive=False):
+    """Read bounded candidate bytes; explicit roots prevent broad input copying."""
+    from tools.sensitive_data import contains_sensitive_data
     folder = Path(folder).resolve()
     found, size = {}, 0
     for current, directories, filenames in os.walk(folder, followlinks=False):
@@ -73,17 +81,102 @@ def _files(folder):
         for name in filenames:
             path = Path(current)/name
             relative = path.relative_to(folder).as_posix()
-            if any(part.casefold() in SKIP_DIRS for part in Path(relative).parts) or Path(relative).parts[0].casefold()=='state' or _secret(relative) or path.suffix in {'.pyc', '.pyo'}:
+            if roots is not None and not any(relative == p.rstrip('/') or relative.startswith(p.rstrip('/') + '/') for p in roots):
+                continue
+            if any(part.casefold() in SKIP_DIRS for part in Path(relative).parts) or Path(relative).parts[0].casefold()=='state' or path.suffix in {'.pyc', '.pyo'}:
+                continue
+            if relative.startswith(('reports/runner/', 'reports/workspace-decisions/')):
+                continue
+            if _secret(relative):
+                if reject_sensitive:
+                    raise ProviderError('작업자가 민감한 이름의 파일을 생성했습니다. 비밀값을 산출물로 반영하지 않습니다.')
                 continue
             path = confined(folder, relative)
             if not path.is_file():
                 continue
-            data = path.read_bytes()
-            size += len(data)
-            if len(found) >= MAX_FILES or size > MAX_BYTES:
+            remaining = MAX_BYTES - size
+            if len(found) >= MAX_FILES or path.stat().st_size > remaining:
                 raise ProviderError("격리 작업 사본의 파일·크기 제한을 초과했습니다. 입력 범위를 줄이세요.")
+            with path.open('rb') as stream:
+                data = stream.read(remaining + 1)
+            if len(data) > remaining:
+                raise ProviderError("격리 작업 사본의 파일·크기 제한을 초과했습니다. 입력 범위를 줄이세요.")
+            if contains_sensitive_data(data):
+                if reject_sensitive:
+                    raise ProviderError('작업 산출물에서 민감정보를 발견했습니다. 비밀값을 제거한 뒤 다시 검증하세요.')
+                continue
+            size += len(data)
             found[relative] = data
     return found
+
+
+def _bounded_bytes(path, limit=MAX_BYTES):
+    path = Path(path)
+    if path.stat().st_size > limit:
+        raise ProviderError('파일 크기 제한을 초과해 읽지 않습니다.')
+    with path.open('rb') as stream:
+        data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise ProviderError('파일이 읽는 동안 크기 제한을 초과했습니다.')
+    return data
+
+
+def _matches_bytes(path, expected):
+    path = Path(path)
+    if not path.is_file() or expected is None or path.stat().st_size != len(expected):
+        return False
+    return _bounded_bytes(path, len(expected)) == expected
+
+
+def _clear_worker_scratch(root):
+    # These exact reserved children are supervisor-owned scratch. Never follow a
+    # model-created link when replacing them before verification.
+    root = Path(root).resolve()
+    for name in ('.ieum-worker-tmp', '.ieum-verification'):
+        target = root / name
+        if target.is_symlink():
+            target.unlink()
+        elif hasattr(target, 'is_junction') and target.is_junction():
+            target.rmdir()
+        elif target.is_dir():
+            shutil.rmtree(target)
+        elif target.exists():
+            target.unlink()
+
+
+def _bounded_log(path):
+    limit = 2 * 1024 * 1024
+    with Path(path).open('rb') as stream:
+        stream.seek(0, 2)
+        truncated = stream.tell() > limit
+        stream.seek(max(0, stream.tell() - limit))
+        value = stream.read(limit).decode('utf-8', errors='replace')
+    return ('[log preview truncated]\n' if truncated else '') + value
+
+
+BUILD_INPUTS = ('package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock',
+                'tsconfig.json', 'pyproject.toml', 'requirements.txt', 'requirements-dev.txt', 'uv.lock',
+                'pytest.ini', 'setup.cfg', 'setup.py', 'go.mod', 'go.sum', 'Cargo.toml', 'Cargo.lock')
+
+
+def _input_files(project, task, execution):
+    declared = execution.get('input_paths')
+    inferred = declared is None
+    if declared is None:
+        from tools.role_agents import resolve
+        if resolve(task.get('role') or 'orchestrator')['id'] in {'qa', 'reviewer', 'security'} and not task.get('inputs'):
+            raise ProviderError('독립 검토의 입력 경로가 없습니다. 실행 계획에 검토할 소스·근거를 연결하세요.')
+        declared = list(task.get('inputs') or []) + [name for name in BUILD_INPUTS if (project/name).is_file()]
+    if not isinstance(declared, list) or any(not isinstance(p, str) or not p for p in declared):
+        raise ProviderError('작업 입력은 프로젝트 상대 경로 목록이어야 합니다.')
+    roots = list(dict.fromkeys(declared + execution['allowed_paths']))
+    for relative in roots:
+        confined(project, relative)
+        if _secret(relative) or Path(relative).parts[0].casefold() in {'state', 'registers', 'process', '.git', '.aws', '.ssh', '.codex', '.claude'}:
+            raise ProviderError('관리 파일이나 민감자료를 작업 입력으로 사용할 수 없습니다.')
+    files = _files(project, roots)
+    return files, {'schema_version': 1, 'inferred': inferred, 'paths': sorted(files),
+                   'sha256': {p: digest(data) for p, data in sorted(files.items())}}
 
 
 def _allowed(path, roots):
@@ -111,7 +204,23 @@ def _execution(task, project):
     commands = value['verification_commands']
     if not isinstance(commands, list) or any(not isinstance(c, list) or not c or any(not isinstance(a, str) or not a for a in c) for c in commands):
         raise ProviderError("검증 명령은 셸 문자열이 아닌 argv 목록이어야 합니다.")
-    return value
+    mode = value.get('verification_mode', 'execute')
+    if mode not in {'execute', 'artifact_only'}:
+        raise ProviderError('검증 모드는 execute 또는 artifact_only여야 합니다.')
+    if mode == 'artifact_only':
+        reason = value.get('verification_reason')
+        if not isinstance(reason, str) or not reason.strip():
+            raise ProviderError('문서 전용 검수에는 실행 검증을 하지 않는 이유가 필요합니다.')
+        from tools.role_agents import resolve
+        code_role = resolve(task.get('role') or 'orchestrator')['id'] in {'backend', 'frontend', 'database', 'devops'}
+        if code_role or any(Path(p).suffix.lower() not in DOCUMENT_SUFFIXES for p in value['expected_outputs']):
+            raise ProviderError('코드·구성 파일·개발 역할은 artifact_only로 검증을 생략할 수 없습니다.')
+        if commands:
+            raise ProviderError('artifact_only와 실행 검증 명령을 함께 지정할 수 없습니다.')
+    elif not commands:
+        raise ProviderError('실행 검증 명령이 비어 있습니다. 코드 검증 계획을 먼저 준비하세요.')
+    # Do not let test callbacks or later mutable task dictionaries change this plan.
+    return json.loads(json.dumps(value, ensure_ascii=False))
 
 
 def _prompt(task, role_contract, execution):
@@ -320,41 +429,97 @@ def _process(command, cwd, stdin, stdout, stderr, timeout, on_started=None, on_h
             tree.close()
 
 
-def _receipt(provider, stdout_path, final_path):
-    records = []
-    for line in stdout_path.read_text(encoding='utf-8', errors='replace').splitlines():
-        try:
-            record = json.loads(line)
-            if isinstance(record, dict): records.append(record)
-        except ValueError:
-            continue
-    usage, session = None, None
-    if provider == 'codex':
-        for event in records:
+def _native_records(path):
+    """Parse bounded native records without loading unbounded raw stdout."""
+    path = Path(path)
+    if not path.is_file():
+        return
+    with path.open('rb') as stream:
+        size = path.stat().st_size
+        if size > MAX_NATIVE_BYTES:
+            stream.seek(size - MAX_NATIVE_BYTES - 1)
+            previous = stream.read(1)
+            if previous != b'\n':
+                stream.readline(256 * 1024 + 1)  # Drop only an actually partial record.
+        consumed = 0
+        while consumed <= MAX_NATIVE_BYTES:
+            line = stream.readline(256 * 1024 + 1)
+            consumed += len(line)
+            if not line:
+                break
+            if len(line) > 256 * 1024:
+                while line and not line.endswith(b'\n'):
+                    line = stream.readline(256 * 1024 + 1)
+                continue
+            try:
+                event = json.loads(line.decode('utf-8'))
+                if isinstance(event, dict):
+                    yield event
+            except (ValueError, UnicodeError):
+                continue
+
+
+def _observed_usage(provider, stdout_path, *, complete=False):
+    """Recover real usage on failed/cancelled attempts; missing observations stay unknown."""
+    session, tokens, cost, observed, terminal = None, None, None, False, False
+    assistant_usage = {}
+    for event in _native_records(stdout_path):
+        if provider == 'codex':
             if event.get('type') in {'thread.started', 'session.started'}:
-                session = event.get('thread_id') or event.get('session_id')
-            if event.get('type') == 'turn.completed' and isinstance(event.get('usage'), dict):
-                u = event['usage']
-                values = [u.get('input_tokens'), u.get('output_tokens')]
-                if all(type(v) is int for v in values):
-                    usage = {'tokens': sum(values), 'cost_usd': None, 'source': 'codex-cli turn.completed'}
-        raw = final_path.read_text(encoding='utf-8') if final_path.is_file() else ''
-        value = json.loads(raw)
+                session = event.get('thread_id') or event.get('session_id') or session
+            if event.get('type') == 'turn.completed':
+                terminal = True
+                u = event.get('usage', {})
+                values = [u.get('input_tokens'), u.get('output_tokens')] if isinstance(u, dict) else []
+                if values and all(type(v) is int and v >= 0 for v in values):
+                    tokens = (tokens or 0) + sum(values)
+                    observed = True
+        elif event.get('type') == 'result':
+            session = event.get('session_id') or session
+            terminal = True
+            u = event.get('usage', {})
+            fields = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
+            values = [u[k] for k in fields if k in u] if isinstance(u, dict) else []
+            if values and all(type(v) is int and v >= 0 for v in values):
+                tokens, observed = sum(values), True
+            number = event.get('total_cost_usd')
+            if type(number) in (int, float) and math.isfinite(number) and number >= 0:
+                cost, observed = number, True
+        elif provider == 'claude' and event.get('type') == 'assistant':
+            message = event.get('message', {})
+            u = message.get('usage', {}) if isinstance(message, dict) else {}
+            values = [u[k] for k in ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens') if k in u] if isinstance(u, dict) else []
+            if values and all(type(v) is int and v >= 0 for v in values):
+                # Repeated records for one message replace rather than double count.
+                assistant_usage[message.get('id') or 'last-unidentified-message'] = sum(values)
+    if tokens is None and assistant_usage:
+        tokens, observed = sum(assistant_usage.values()), True
+    usage = {'tokens': tokens, 'cost_usd': cost, 'source': provider + '-cli observed stream',
+             'coverage': 'complete' if complete and terminal and Path(stdout_path).stat().st_size <= MAX_NATIVE_BYTES else 'partial'} if observed else None
+    return usage, session
+
+
+def _receipt(provider, stdout_path, final_path):
+    usage, session = _observed_usage(provider, stdout_path, complete=True)
+    if provider == 'codex':
+        if not final_path.is_file() or final_path.stat().st_size > 1024 * 1024:
+            raise ProviderError('실제 파일을 가리키는 1MiB 이하의 완료 영수증이 필요합니다.')
+        with final_path.open('rb') as handle:
+            raw = handle.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ProviderError('완료 영수증의 크기 한도를 초과했습니다.')
+        value = json.loads(raw.decode('utf-8'))
     else:
-        result = next((r for r in reversed(records) if r.get('type') == 'result'), None)
+        result = None
+        for record in _native_records(stdout_path):
+            if record.get('type') == 'result':
+                result = record
         if not result or result.get('is_error'):
             raise ProviderError('Claude 실행이 결과를 반환하지 않았거나 오류를 보고했습니다.')
-        session = result.get('session_id')
-        u = result.get('usage', {})
-        token_fields = ('input_tokens', 'output_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens')
-        tokens = sum(u[k] for k in token_fields if k in u) if isinstance(u,dict) and any(k in u for k in token_fields) and all(type(u[k]) is int and u[k]>=0 for k in token_fields if k in u) else None
-        cost = result.get('total_cost_usd')
-        usage = {'tokens': tokens, 'cost_usd': cost if type(cost) in (int,float) else None, 'source': 'claude-code result.usage'}
         value = result.get('structured_output')
         if value is None:
-            raw = result.get('result', '')
-            value = json.loads(raw)
-    if not isinstance(value, dict) or not isinstance(value.get('summary'), str) or not isinstance(value.get('evidence_refs'), list) or any(not isinstance(p,str) for p in value['evidence_refs']):
+            value = json.loads(result.get('result', ''))
+    if not isinstance(value, dict) or not isinstance(value.get('summary'), str) or not isinstance(value.get('evidence_refs'), list) or any(not isinstance(p, str) for p in value['evidence_refs']):
         raise ProviderError('실제 파일을 가리키는 구조화 완료 영수증이 필요합니다.')
     return value, usage, session
 
@@ -379,6 +544,9 @@ def _publish(project, task, before, candidate, execution):
         if actual:
             if actual.get('execution') != task.get('execution'):
                 raise ProviderError('실행 중 작업 계약이 변경되었습니다.')
+            from tools.verification_contract import task_context
+            if task_context(actual) != task_context(task):
+                raise ProviderError('실행 중 역할·요구사항·입력·의존성 계약이 변경되었습니다.')
             if workspace.blockers(project,store,current,identifier):
                 raise ProviderError('실행 중 선행 작업 또는 승인 기준이 변경되었습니다.')
         command_id = task.get('_command_id')
@@ -398,8 +566,9 @@ def _publish(project, task, before, candidate, execution):
             if p == 'registers/tasks.csv' or p.startswith('reports/runner/'):
                 continue
             path=confined(project,p)
-            actual_bytes=path.read_bytes() if path.is_file() else None
-            if actual_bytes!=before.get(p):
+            expected_bytes=before.get(p)
+            unchanged = _matches_bytes(path, expected_bytes) if expected_bytes is not None else not path.exists()
+            if not unchanged:
                 raise ProviderError('작업 중 입력·출력이 변경되어 덮어쓰지 않습니다: '+p)
         if changed:
             revision=lifecycle.add_event(project,changed,'workspace-worker-output', 'native-'+task.get('role','worker'), {'task_id':identifier,'paths':sorted(changed)})
@@ -439,7 +608,7 @@ def _repair_overlay(project, candidate_root, task):
             raise ProviderError('감독자가 보존한 QA 반례만 사용할 수 있습니다.')
         if not isinstance(target, str) or not target.startswith(('tests/', 'checks/')) or not _allowed(target, [target]):
             raise ProviderError('QA 반례는 프로젝트 테스트 경로만 사용할 수 있습니다.')
-        data = confined(project, source).read_bytes()
+        data = _bounded_bytes(confined(project, source))
         if digest(data) != item['sha256']:
             raise ProviderError('보존된 QA 반례의 해시가 변경되었습니다.')
         path = confined(candidate_root, target)
@@ -451,142 +620,276 @@ def _repair_overlay(project, candidate_root, task):
 def _verify_repair_overlay(candidate_root, checks):
     for item in checks:
         path = confined(candidate_root, item['target'])
-        if not path.is_file() or digest(path.read_bytes()) != item['sha256']:
+        if not path.is_file() or digest(_bounded_bytes(path)) != item['sha256']:
             raise ProviderError('개발 작업자가 독립 QA 반례를 변경하거나 삭제했습니다.')
 
 
 def run_job(project, task, role_contract, job_dir, *, provider, executable=None, timeout=900,
             on_started=None, on_heartbeat=None, stop_event=None, on_activity=None, verification_executable=None):
     project, job_dir = Path(project).resolve(), Path(job_dir).resolve()
-    job_dir.mkdir(parents=True,exist_ok=True)
-    result = {'success':False, 'summary':'', 'evidence_refs':[], 'usage':None, 'provider_session_id':None,
-              'exit_code':None, 'verification':[], 'process_started':False, 'logs':str(job_dir)}
+    job_dir.mkdir(parents=True, exist_ok=True)
+    started_at = time.monotonic()
+    deadline = None
+    model_complete = False
+    result = {'success': False, 'summary': '', 'evidence_refs': [], 'usage': None, 'usage_coverage': 'unknown',
+              'provider_session_id': None, 'exit_code': None, 'verification': [], 'verification_status': 'not_run',
+              'process_started': False, 'logs': str(job_dir)}
     def emit(kind, summary, **fields):
         if on_activity:
             try:
-                on_activity({'kind':kind, 'summary':summary, **fields})
+                on_activity({'kind': kind, 'summary': summary, **fields})
             except (ValueError, OSError) as exc:
                 result.setdefault('telemetry_errors', []).append(type(exc).__name__)
     def native_event(event):
         emit(event.pop('kind'), event.pop('summary'), **event)
+    def remaining(cap=None):
+        if stop_event is not None and stop_event.is_set():
+            result['failure_kind'] = 'cancelled'
+            raise ProviderError('실행 중지 요청을 받았습니다.')
+        value = deadline - time.monotonic()
+        if value <= 0:
+            result['failure_kind'] = 'timeout'
+            raise ProviderError('작업 전체 제한 시간을 초과했습니다. 검증마다 시간을 초기화하지 않습니다.')
+        return min(value, cap) if cap is not None else value
     try:
-        execution=_execution(task, project)
-        candidate_root=job_dir/'workspace'
+        if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
+            raise ProviderError('작업 전체 제한 시간은 양수여야 합니다.')
+        deadline = started_at + timeout
+        if not isinstance(task, dict):
+            raise ProviderError('등록된 작업의 구조화 실행 계약이 필요합니다.')
+        task = json.loads(json.dumps(task, ensure_ascii=False))
+        execution = _execution(task, project)
+        result['verification_mode'] = execution.get('verification_mode', 'execute')
+        from tools import verification_runtime
+        try:
+            verification_runtime.preflight(execution, project)
+        except ValueError:
+            result['failure_kind'] = 'environment_unavailable'
+            raise
+        original_plan = json_bytes(task.get('execution'))
+        candidate_root = job_dir / 'workspace'
         if candidate_root.exists():
             raise ProviderError('이미 사용한 작업 사본을 재사용하지 않습니다.')
-        before=_files(project)
+        before, input_manifest = _input_files(project, task, execution)
+        result['input_manifest'] = input_manifest
         candidate_root.mkdir()
-        for p,data in before.items():
-            target=confined(candidate_root,p);target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(data)
-        repair_checks=_repair_overlay(project,candidate_root,task)
-        schema=job_dir/'receipt.schema.json';schema.write_bytes(json_bytes(SCHEMA))
-        final_path=job_dir/'final.json'
-        cmd=executable_argv(provider,executable)
-        if provider=='codex':
-            cmd += ['exec','--ephemeral','--skip-git-repo-check','--approve-for-me','--json','-C',str(candidate_root),'--output-schema',str(schema),'-o',str(final_path),'-']
+        for relative, data in before.items():
+            target = confined(candidate_root, relative)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        repair_checks = _repair_overlay(project, candidate_root, task)
+        schema = job_dir / 'receipt.schema.json'
+        schema.write_bytes(json_bytes(SCHEMA))
+        final_path = job_dir / 'final.json'
+        cmd = executable_argv(provider, executable)
+        if provider == 'codex':
+            cmd += ['exec', '--ephemeral', '--skip-git-repo-check', '--approve-for-me', '--json', '-C', str(candidate_root),
+                    '--output-schema', str(schema), '-o', str(final_path), '-']
         else:
-            cmd += ['-p','--permission-mode','acceptEdits','--tools','Read,Glob,Grep,Write,Edit',
-                    '--allowedTools','Read,Glob,Grep,Write,Edit','--no-session-persistence','--output-format','stream-json',
-                    '--verbose','--max-turns','30','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--no-chrome',
-                    '--json-schema',json.dumps(SCHEMA,separators=(',',':'))]
+            cmd += ['-p', '--permission-mode', 'acceptEdits', '--tools', 'Read,Glob,Grep,Write,Edit',
+                    '--allowedTools', 'Read,Glob,Grep,Write,Edit', '--no-session-persistence', '--output-format', 'stream-json',
+                    '--verbose', '--max-turns', '30', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--no-chrome',
+                    '--json-schema', json.dumps(SCHEMA, separators=(',', ':'))]
+        from tools import worker_boundary
+        remaining()
+        try:
+            boundary = worker_boundary.prepare(provider, cmd, candidate_root, project, job_dir,
+                executable=executable, allowed_paths=execution['allowed_paths'])
+        except ValueError:
+            result['failure_kind'] = 'worker_boundary_unavailable'
+            raise
+        result['worker_boundary'] = boundary['contract']
+        cmd = boundary['argv']
         def started(pid):
-            result['process_started']=True;result['pid']=pid
-            if on_started:on_started(pid)
-        code,_=_process(cmd,candidate_root,_prompt(task,role_contract,execution),job_dir/'stdout.jsonl',job_dir/'stderr.log',timeout,started,on_heartbeat,stop_event,native_provider=provider,on_activity=native_event)
-        result['exit_code']=code
+            result['process_started'] = True
+            result['pid'] = pid
+            if on_started:
+                on_started(pid)
+        from tools.sensitive_data import redact_text
+        prompt = redact_text(_prompt(task, role_contract, execution))
+        code, _ = _process(cmd, candidate_root, prompt, job_dir/'stdout.jsonl', job_dir/'stderr.log', remaining(),
+                           started, on_heartbeat, stop_event, native_provider=provider, on_activity=native_event, environment=boundary['env'])
+        result['exit_code'] = code
+        model_complete = code == 0
         if code:
             raise ProviderError('네이티브 CLI가 실패했습니다. 인증·권한·작업 로그를 확인하세요. 종료 '+str(code))
-        receipt,usage,session=_receipt(provider,job_dir/'stdout.jsonl',final_path)
-        result.update(summary=receipt['summary'],usage=usage,provider_session_id=session)
+        receipt, usage, session = _receipt(provider, job_dir/'stdout.jsonl', final_path)
+        result.update(summary=redact_text(receipt['summary']), usage=usage, provider_session_id=session)
         output_refs, input_refs = [], []
-        for p in receipt['evidence_refs']:
-            confined(project,p)
-            if _allowed(p,execution['allowed_paths']):
-                output_refs.append(p)
-            elif p in before and confined(candidate_root,p).is_file() and confined(candidate_root,p).read_bytes()==before[p]:
-                # Read-only source citations are provenance, not produced output.
-                input_refs.append(p)
+        for relative in receipt['evidence_refs']:
+            confined(project, relative)
+            if _allowed(relative, execution['allowed_paths']):
+                output_refs.append(relative)
+            elif relative in before and _matches_bytes(confined(candidate_root, relative), before[relative]):
+                input_refs.append(relative)
             else:
-                raise ProviderError('모델 영수증의 경로가 담당 범위 밖입니다: '+p)
-        result['input_refs']=input_refs
-        receipt['evidence_refs']=output_refs
-        _verify_repair_overlay(candidate_root,repair_checks)
-        # Check actual readability before invoking tests; native sandbox ownership
-        # failures must not be disguised as Python import/test failures.
-        for p in execution['expected_outputs']:
+                raise ProviderError('모델 영수증의 경로가 담당 범위 밖입니다: '+relative)
+        result['input_refs'] = input_refs
+        receipt['evidence_refs'] = output_refs
+        _verify_repair_overlay(candidate_root, repair_checks)
+        for relative in execution['expected_outputs']:
             try:
-                expected=confined(candidate_root,p)
-                if not expected.is_file() or not expected.read_bytes():
-                    result['failure_kind']='missing_output'
-                    raise ProviderError('검증 사본에 예상 출력이 없습니다: '+p)
+                expected = confined(candidate_root, relative)
+                if not expected.is_file() or expected.stat().st_size == 0:
+                    result['failure_kind'] = 'missing_output'
+                    raise ProviderError('검증 사본에 예상 출력이 없습니다: '+relative)
             except PermissionError as exc:
-                result['failure_kind']='output_access'
-                raise ProviderError('예상 산출물을 읽을 권한이 없습니다. 작업 사본 위치를 확인하세요: '+p) from exc
-        # Verification also runs in the copy. Generated tests must never get
-        # project records as their working-directory write targets.
-        verification_lines=[]
-        for i,argv in enumerate(execution['verification_commands']):
-            emit('verification_started', f"등록 검증 {i+1}/{len(execution['verification_commands'])} 실행 중", status='running')
-            planned_argv=list(argv)
-            argv=list(argv)
-            if argv[0] in {'python','python3','python.exe'}:argv[0]=sys.executable
+                result['failure_kind'] = 'output_access'
+                raise ProviderError('예상 산출물을 읽을 권한이 없습니다. 작업 사본 위치를 확인하세요: '+relative) from exc
+        _clear_worker_scratch(candidate_root)
+        # Prepare trusted dependencies before sealing. The model cannot choose an
+        # arbitrary host interpreter/home grant through its generated output.
+        from tools import verification_runtime
+        scratch = confined(candidate_root, '.ieum-verification/tmp')
+        scratch.mkdir(parents=True, exist_ok=True)
+        runtime_plans = []
+        for argv in execution['verification_commands']:
+            remaining()
+            planned = list(argv)
+            if planned[0] in {'python', 'python3', 'python.exe'}:
+                planned[0] = sys.executable
+            try:
+                runtime_plans.append(verification_runtime.prepare(planned, candidate_root, execution, scratch, project=project))
+            except ValueError:
+                result['failure_kind'] = 'environment_unavailable'
+                raise
+        from tools.verification_contract import VerificationContract
+        sealed = VerificationContract(_files(candidate_root, reject_sensitive=True), execution, task)
+        publish_files = dict(sealed.files)
+        for item in repair_checks:
+            target = item['target']
+            if target in before:
+                publish_files[target] = before[target]
+            else:
+                publish_files.pop(target, None)
+        changed = {name: data for name, data in publish_files.items() if before.get(name) != data}
+        if result['verification_mode'] == 'artifact_only' and any(Path(name).suffix.lower() not in DOCUMENT_SUFFIXES for name in changed):
+            result['failure_kind'] = 'verification_policy'
+            raise ProviderError('문서 전용 검수에서 코드·구성 파일을 생성하거나 변경할 수 없습니다.')
+        static_checks = []
+        for name in sorted(set(changed) | set(execution['expected_outputs'])):
+            if Path(name).suffix.lower() not in {'.py', '.pyi'} or name not in sealed.files:
+                continue
+            try:
+                # Parsing is a supervisor check, never execution of model code.
+                compile(sealed.files[name], name, 'exec', flags=ast.PyCF_ONLY_AST, dont_inherit=True)
+            except (SyntaxError, ValueError) as error:
+                result['failure_kind'] = 'output_syntax'
+                result['verification_status'] = 'failed'
+                result['static_verification'] = static_checks + [{'path': name, 'check': 'python-ast', 'status': 'failed'}]
+                raise ProviderError('생성된 Python 산출물의 구문 검사를 통과하지 못했습니다: '+name+' ('+str(error)+')') from error
+            static_checks.append({'path': name, 'check': 'python-ast', 'status': 'passed', 'sha256': digest(sealed.files[name])})
+        result['static_verification'] = static_checks
+        output_names = set(changed) | set(execution['expected_outputs']) | set(receipt['evidence_refs'])
+        verified_outputs = {name: publish_files[name] for name in output_names if name in publish_files}
+        if not set(execution['expected_outputs']).issubset(verified_outputs):
+            raise ProviderError('검증 계약에 예상 산출물의 실제 바이트가 없습니다.')
+        contract_receipt = sealed.receipt(verified_outputs)
+        contract_receipt['published_output_sha256'] = None
+        result['verification_contract'] = contract_receipt
+        verification_lines = []
+        def check_runtime(plan):
+            try:
+                verification_runtime.assert_unchanged(plan)
+            except ValueError:
+                result['failure_kind'] = 'environment_unavailable'
+                raise
+        for i, (planned_argv, runtime_plan) in enumerate(zip(execution['verification_commands'], runtime_plans)):
+            check_runtime(runtime_plan)
+            emit('verification_started', f"등록 검증 {i+1}/{len(runtime_plans)} 실행 중", status='running')
             from tools.verification_sandbox import prepare, SandboxUnavailable
             sandbox_cli = verification_executable or (executable if provider == 'codex' and isinstance(executable, (str, Path)) else None)
             try:
-                sandbox_command, sandbox_env, sandbox_info = prepare(argv, candidate_root, project, executable=sandbox_cli)
+                sandbox_command, sandbox_env, sandbox_info = prepare(runtime_plan['argv'], candidate_root, project,
+                    executable=sandbox_cli, readonly=True, read_paths=runtime_plan.get('read_paths', []),
+                    environment=runtime_plan.get('env', {}))
             except SandboxUnavailable:
                 result['failure_kind'] = 'sandbox_unavailable'
                 raise
             result['verification_sandbox'] = sandbox_info
             try:
-                code,_=_process(sandbox_command,candidate_root,None,job_dir/f'verification-{i}.stdout',job_dir/f'verification-{i}.stderr',min(timeout,300),on_heartbeat=on_heartbeat,stop_event=stop_event,environment=sandbox_env)
+                code, _ = _process(sandbox_command, candidate_root, None, job_dir/f'verification-{i}.stdout',
+                    job_dir/f'verification-{i}.stderr', remaining(300), on_heartbeat=on_heartbeat,
+                    stop_event=stop_event, environment=sandbox_env)
             finally:
                 from tools.verification_sandbox import cleanup
                 try:
                     cleanup(sandbox_info)
                 except (OSError, ValueError) as cleanup_error:
-                    result.setdefault('telemetry_errors', []).append('verification_runtime_cleanup:' + type(cleanup_error).__name__)
-            out=(job_dir/f'verification-{i}.stdout').read_text(encoding='utf-8',errors='replace')
-            err=(job_dir/f'verification-{i}.stderr').read_text(encoding='utf-8',errors='replace')
+                    result.setdefault('telemetry_errors', []).append('verification_runtime_cleanup:'+type(cleanup_error).__name__)
+            out = _bounded_log(job_dir/f'verification-{i}.stdout')
+            err = _bounded_log(job_dir/f'verification-{i}.stderr')
             marker = sandbox_info.get('started_marker')
             if marker and not Path(marker).is_file():
                 result['failure_kind'] = 'sandbox_unavailable'
                 emit('verification_failed', '격리 검증을 시작하지 못했습니다. 검증 CLI·MXC·권한 상태를 확인하세요.', status='failed')
                 raise ProviderError('OS 격리 검증을 시작하지 못했습니다. 비격리 실행은 하지 않았습니다. 검증 로그를 확인하세요.')
-            result['verification'].append({'command':planned_argv,'executed_command':argv,'exit_code':code})
-            emit('verification_failed' if code else 'verification_passed', f"등록 검증 {i+1}/{len(execution['verification_commands'])} " + ('실패' if code else '통과'), status='failed' if code else 'completed')
-            verification_lines += ['COMMAND: '+json.dumps(argv,ensure_ascii=False), 'EXIT: '+str(code),out,err]
-            if code:break
-        log_relative='reports/runner/'+job_dir.name+'/verification.txt'
-        log_path=confined(project,log_relative);log_path.parent.mkdir(parents=True,exist_ok=True)
-        log_path.write_text('\n'.join(verification_lines) if verification_lines else 'No verification command configured; artefact hashes only.\n',encoding='utf-8')
+            result['verification'].append({'command': list(planned_argv), 'executed_command': runtime_plan['argv'],
+                'exit_code': code, 'runtime_fingerprint': runtime_plan.get('fingerprint'),
+                'environment_unavailable': bool(code and 'IEUM_ENVIRONMENT_UNAVAILABLE:' in out + err)})
+            emit('verification_failed' if code else 'verification_passed',
+                 f"등록 검증 {i+1}/{len(runtime_plans)} " + ('실패' if code else '통과'), status='failed' if code else 'completed')
+            verification_lines += ['COMMAND: '+redact_text(json.dumps(planned_argv, ensure_ascii=False)),
+                                   'EXIT: '+str(code), redact_text(out), redact_text(err)]
+            try:
+                sealed.assert_unchanged(_files(candidate_root, reject_sensitive=True), execution)
+                check_runtime(runtime_plan)
+                if json_bytes(task.get('execution')) != original_plan:
+                    raise ValueError('검증 중 실행 계약이 변경되어 반영하지 않습니다.')
+            except ValueError:
+                if result.get('failure_kind') != 'environment_unavailable':
+                    result['failure_kind'] = 'verification_integrity'
+                raise
+            if code:
+                break
+        log_relative = 'reports/runner/'+job_dir.name+'/verification.txt'
+        log_path = confined(project, log_relative)
+        atomic_write(log_path, ('\n'.join(verification_lines) if verification_lines else
+            'Artifact-only review; no executable verification was claimed.\n').encode('utf-8'))
         if any(v['exit_code'] for v in result['verification']):
-            result['failure_kind']='verification_failed'
-            result['feedback_refs']=[log_relative]
-            result['check_hashes']=_capture_qa_checks(project,task,job_dir,before,candidate_root)
+            environment_error = any(v.get('environment_unavailable') for v in result['verification'])
+            result['failure_kind'] = 'environment_unavailable' if environment_error else 'verification_failed'
+            result['verification_status'] = 'failed'
+            result['feedback_refs'] = [log_relative]
+            if environment_error:
+                raise ProviderError('현재 Windows 네트워크 격리 환경은 asyncio의 TCP 내부 채널을 지원하지 않습니다. 호환 검증 환경을 준비하세요. 코드 자동 수정은 요청하지 않습니다.')
+            result['check_hashes'] = _capture_qa_checks(project, task, job_dir, before, candidate_root)
             raise ProviderError('독립 검증 명령이 실패했습니다. 후속 작업을 시작하지 않습니다.')
-        _verify_repair_overlay(candidate_root,repair_checks)
-        candidate=_files(candidate_root)
-        # Counterexamples are supervisor inputs, never developer-published outputs.
-        for item in repair_checks:
-            target=item['target']
-            if target in before:
-                candidate[target]=before[target]
-            else:
-                candidate.pop(target,None)
-        for p in execution['expected_outputs']:
-            expected=confined(candidate_root,p)
-            if not expected.is_file() or expected.stat().st_size==0:
-                raise ProviderError('검증 사본에 예상 출력이 없습니다: '+p)
-        result['published_paths']=_publish(project,task,before,candidate,execution)
-        evidence=list(dict.fromkeys(execution['expected_outputs']+receipt['evidence_refs']+[log_relative]))
-        for p in evidence:
-            path=confined(project,p)
-            if not path.is_file() or path.stat().st_size==0:
-                raise ProviderError('예상한 실제 출력 파일이 없습니다: '+p)
-        result.update(success=True,evidence_refs=evidence)
-    except (ValueError,OSError,subprocess.SubprocessError) as exc:
-        result.update(error=str(exc),summary=str(exc))
+        remaining()
+        _verify_repair_overlay(candidate_root, repair_checks)
+        sealed.assert_unchanged(_files(candidate_root, reject_sensitive=True), execution)
+        if json_bytes(task.get('execution')) != original_plan:
+            result['failure_kind'] = 'verification_integrity'
+            raise ProviderError('검증 후 실행 계약이 변경되어 반영하지 않습니다.')
+        for runtime_plan in runtime_plans:
+            check_runtime(runtime_plan)
+        # Publication consumes the frozen byte strings, never a fresh filesystem read.
+        result['published_paths'] = _publish(project, task, before, publish_files, execution)
+        result['verification_contract'] = sealed.receipt(verified_outputs)
+        evidence = list(dict.fromkeys(execution['expected_outputs']+receipt['evidence_refs']+[log_relative]))
+        for relative in evidence:
+            path = confined(project, relative)
+            if not path.is_file() or path.stat().st_size == 0:
+                raise ProviderError('예상한 실제 출력 파일이 없습니다: '+relative)
+        result.update(success=True, evidence_refs=evidence,
+                      verification_status='passed' if runtime_plans else 'artifact_only')
+    except (ValueError, OSError, subprocess.SubprocessError) as exc:
+        from tools.sensitive_data import redact_text
+        result.update(error=redact_text(str(exc)), summary=redact_text(str(exc)))
+        if result.get('verification_mode') and result['verification_status'] == 'not_run' and result['verification']:
+            result['verification_status'] = 'failed'
+        if deadline is not None and time.monotonic() >= deadline:
+            result['failure_kind'] = 'timeout'
     finally:
-        (job_dir/'result.json').write_bytes(json_bytes(result))
+        # A failed receipt or cancelled model may still have reported real usage.
+        observed, session = _observed_usage(provider, job_dir/'stdout.jsonl', complete=model_complete)
+        if observed is not None:
+            result['usage'] = observed
+            result['usage_coverage'] = observed['coverage']
+        elif result.get('usage'):
+            result['usage_coverage'] = result['usage'].get('coverage', 'partial')
+        if session:
+            result['provider_session_id'] = session
+        result['elapsed_seconds'] = round(time.monotonic()-started_at, 6)
+        atomic_write(job_dir/'result.json', json_bytes(result))
     return result

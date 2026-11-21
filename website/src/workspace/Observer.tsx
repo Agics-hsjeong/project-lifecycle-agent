@@ -3,12 +3,16 @@ import {
   ROLE,
   active,
   completed,
+  excluded,
+  settled,
   type Snapshot,
   type Task,
   type Selection,
 } from "./model";
 import { Icon } from "./Views";
 import { RoleTimeline } from "./RoleTimeline";
+import { hasIssue, waiting } from "./model";
+import { VerificationBadge } from "./VerificationBadge";
 import "./observer-b.css";
 
 export type Activity = {
@@ -250,8 +254,17 @@ function taskNote(task: Task, snapshot: Snapshot, latest?: Activity) {
       task.latest_action ||
       "작업 프로세스가 실행 중입니다. 다음 행동 보고를 기다립니다."
     );
+  if (excluded(task))
+    return (
+      task.exclusion_reason ||
+      task.latest_action ||
+      "적용 범위에서 제외한 작업입니다. 완료율에 포함하지 않습니다."
+    );
   if (completed(task))
-    return task.latest_action || "산출물과 완료 근거가 기록되었습니다.";
+    return (
+      task.latest_action ||
+      "파일 생성·작업 완료 기록입니다. 검증 상태를 별도로 확인하세요."
+    );
   if (taskHasIssue(task, snapshot))
     return (
       task.waiting_reason ||
@@ -262,7 +275,7 @@ function taskNote(task: Task, snapshot: Snapshot, latest?: Activity) {
     );
   const pending = task.depends_on
     .map((id) => snapshot.tasks.find((t) => t.id === id))
-    .filter((t) => t && !completed(t!));
+    .filter((t) => t && !settled(t!));
   if (pending.length)
     return `${pending.map((t) => t!.title).join(" · ")} 완료 후 시작`;
   if (["awaiting_approval", "awaiting_decision"].includes(task.status))
@@ -325,14 +338,9 @@ function currentCommand(task: Task, snapshot: Snapshot) {
     .at(-1);
 }
 function taskHasIssue(task: Task, snapshot: Snapshot) {
-  if (active(task) || completed(task)) return false;
-  const command = currentCommand(task, snapshot);
-  return (
-    ["failed", "stale"].includes(task.status) ||
-    command?.status === "failed" ||
-    (!command && ["failed", "attention"].includes(task.observed_status))
-  );
+  return hasIssue(task, snapshot);
 }
+
 function statusText(task: Task, live: boolean, snapshot: Snapshot) {
   if (active(task)) return live ? "진행 중" : "활동 확인 필요";
   if (task.status !== "stale" && taskHasIssue(task, snapshot))
@@ -384,9 +392,15 @@ export function Observer({
     {
       id: "waiting",
       title: "대기",
-      items: tasks.filter((task) => !active(task) && !completed(task)),
+      items: tasks.filter((task) => waiting(task, snapshot)),
+    },
+    {
+      id: "attention",
+      title: "확인 필요",
+      items: tasks.filter((task) => hasIssue(task, snapshot)),
     },
     { id: "done", title: "완료", items: tasks.filter(completed) },
+    { id: "excluded", title: "적용 제외", items: tasks.filter(excluded) },
   ];
   const shownGroups =
     filter === "all" ? groups : groups.filter((group) => group.id === filter);
@@ -555,6 +569,7 @@ export function Observer({
                             <i aria-hidden="true" />
                             <span>{status}</span>
                           </span>
+                          <VerificationBadge task={task} />
                           <small title={note}>{note}</small>
                         </td>
                         <td className="b-cell-time mono" data-label="경과">

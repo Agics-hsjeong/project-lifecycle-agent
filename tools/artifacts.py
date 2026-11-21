@@ -74,8 +74,13 @@ def review(folder, payload, actor="agent"):
     from tools import lifecycle, proposal, reference_templates, runs, starter
     root, _ = starter.load_project(folder)
     fields = {"expected_revision", "role", "source_file", "pdf_file", "pages", "review_ref"}
-    if not isinstance(payload, dict) or set(payload) != fields or payload["role"] not in {"qualitative", "presentation"}:
+    optional = {"renderer_receipt_id", "require_render_provenance"}
+    if not isinstance(payload, dict) or not fields <= set(payload) or set(payload) - fields - optional or payload["role"] not in {"qualitative", "presentation"}:
         raise ValueError("artifact-review 필드·종류를 확인하세요.")
+    if "require_render_provenance" in payload and type(payload["require_render_provenance"]) is not bool:
+        raise ValueError("require_render_provenance는 true/false여야 합니다.")
+    if payload.get("require_render_provenance") and not payload.get("renderer_receipt_id"):
+        raise ValueError("감독자 PDF 렌더 영수증이 필요합니다. artifact_renderer를 먼저 실행하세요.")
     with lock(root):
         runs.require_revision(root, payload)
         source = starter.local_file(root, payload["source_file"])
@@ -106,6 +111,12 @@ def review(folder, payload, actor="agent"):
             indexes.append(page["page"])
         if sorted(indexes) != list(range(1, count+1)):
             raise ValueError("페이지 누락·중복")
+        provenance = {"status": "host_reported_unverified", "source_to_pdf": "host_supplied_unverified",
+                      "content_style_review": "host_reported"}
+        if "renderer_receipt_id" in payload:
+            from tools import artifact_renderer
+            provenance = artifact_renderer.validate(root, payload["renderer_receipt_id"],
+                                                     payload["source_file"], payload["pdf_file"], pages)
         proof = starter.local_file(root, payload["review_ref"])
         if proof.suffix.lower() not in {".md", ".txt", ".json"}:
             raise ValueError("실제 내용·스타일 검수 기록이 필요합니다.")
@@ -118,14 +129,18 @@ def review(folder, payload, actor="agent"):
             raise ValueError("검수 중 원본·PDF 변경")
         record = {k: v for k, v in payload.items() if k != "expected_revision"}
         record.update(files=files, page_count=count, actor=actor,
+                      render_provenance=provenance,
                       template_id=reference_templates.selection(root).get(payload["role"], ""))
         data = read(root)
         data["reviews"][payload["role"]] = record
         changes = {STORE: json_bytes(data)}
         revision = lifecycle.add_event(root, changes, "artifact-review", actor,
-                                       {"role": payload["role"], "page_count": count, "files": sorted(files)})
+                                       {"role": payload["role"], "page_count": count, "files": sorted(files),
+                                        "render_provenance": provenance})
         commit(root, changes)
-        return {"revision": revision, "page_count": count, "notice": "파일·전체 이미지 목록·호스트 검수 근거를 연결했습니다. 내용·스타일을 자동 인증하거나 사람의 승인으로 대체하지 않습니다."}
+        scope = "PDF→PNG 출처 확인" if provenance["status"] == "pdf_pages_verified" else "PDF→PNG 출처 미확인(호스트 보고)"
+        return {"revision": revision, "page_count": count, "render_provenance": provenance,
+                "notice": f"{scope}. 파일·전체 이미지 목록·호스트 검수 근거를 연결했습니다. 내용·스타일을 자동 인증하거나 사람의 승인으로 대체하지 않습니다."}
 
 
 def files(root):
@@ -159,4 +174,15 @@ def check(root, project, profile):
                     raise ValueError("변경")
             except (ValueError, OSError):
                 result.append(f"{role}: 검수 후 파일 변경·누락 ({ref})")
+        if "renderer_receipt_id" in record:
+            from tools import artifact_renderer
+            try:
+                current = artifact_renderer.validate(root, record["renderer_receipt_id"], record["source_file"],
+                                                     record["pdf_file"], record["pages"])
+                if current != record.get("render_provenance"):
+                    raise ValueError("검수 출처 요약과 감독자 영수증이 다릅니다.")
+            except (ValueError, OSError, KeyError, TypeError) as exc:
+                result.append(f"{role}: PDF 렌더 출처 검증 실패 ({exc})")
+        elif record.get("require_render_provenance"):
+            result.append(f"{role}: 감독자 PDF 렌더 영수증이 필요합니다.")
     return result

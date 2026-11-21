@@ -2,6 +2,8 @@
 import argparse
 import base64
 import difflib
+from contextvars import ContextVar
+from functools import wraps
 import json
 from datetime import datetime, timedelta, timezone
 import math
@@ -11,6 +13,7 @@ import uuid
 
 from tools import lifecycle, runs, starter, workflow
 from tools.storage import commit, confined, consistent_read, digest, json_bytes, lock
+from tools.sensitive_data import is_sensitive_path, contains_sensitive_data, redact_text, redact_value
 
 STORE = "state/workspace.json"
 RUNTIME_STORE = "state/workspace-runtime.json"
@@ -25,6 +28,23 @@ PHASES = [
     {"id": "05", "title": "인수와 운영", "stages": ["handover", "maintenance"]},
 ]
 MAX_FILE = 2 * 1024 * 1024
+_HASH_SCOPE = ContextVar('workspace_snapshot_hashes', default=None)
+
+
+def snapshot_hash_scope(function):
+    """Memoize unchanged files only during one consistent snapshot read.
+
+    Never reuse across requests: external edits need no lifecycle revision.
+    Context-local storage avoids sharing between HTTP threads or projects.
+    """
+    @wraps(function)
+    def scoped(*args, **kwargs):
+        token = _HASH_SCOPE.set({})
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _HASH_SCOPE.reset(token)
+    return scoped
 
 
 class Conflict(ValueError):
@@ -65,19 +85,33 @@ def file_bytes(root, relative):
         return None
     if path.stat().st_size > MAX_FILE:
         raise ValueError("관제 파일 크기 제한(2MiB)을 초과했습니다.")
-    return path.read_bytes()
+    with path.open('rb') as stream:
+        value = stream.read(MAX_FILE + 1)
+    if len(value) > MAX_FILE:
+        raise ValueError("관제 파일 크기 제한(2MiB)을 초과했습니다.")
+    return value
 
 
 def file_hash(root, relative):
     path = confined(root, relative)
     if not path.is_file():
         return None
+    info = path.stat()
+    signature = (str(path), info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    memo = _HASH_SCOPE.get()
+    if memo is not None and signature in memo:
+        return memo[signature]
     import hashlib
     result = hashlib.sha256()
     with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(65536), b""):
             result.update(chunk)
-    return result.hexdigest()
+    value = result.hexdigest()
+    # Concurrent external writes cannot poison this request's memo.
+    after = path.stat()
+    if memo is not None and (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == signature[1:]:
+        memo[signature] = value
+    return value
 
 
 def version_hashes(root, gate):
@@ -162,7 +196,7 @@ def execution_path(root, relative):
 
 
 def validate_execution(root, value):
-    allowed = {"instruction", "allowed_paths", "expected_outputs", "verification_commands"}
+    allowed = {"instruction", "allowed_paths", "expected_outputs", "verification_commands", "input_paths", "verification_mode", "verification_reason", "runtime_ref"}
     if not isinstance(value, dict) or set(value) - allowed or not {"instruction", "allowed_paths", "expected_outputs"}.issubset(value):
         raise ValueError("실행 계획은 instruction/allowed_paths/expected_outputs가 필요합니다.")
     if not isinstance(value["instruction"], str) or not value["instruction"].strip() or len(value["instruction"]) > 50000:
@@ -186,6 +220,8 @@ def validate_execution(root, value):
     for command in commands:
         if not isinstance(command, list) or not command or len(command) > 100 or any(not isinstance(arg, str) or not arg or len(arg) > 10000 or "\x00" in arg for arg in command):
             raise ValueError("검증 명령에는 셸 문자열 대신 문자열 argv 목록을 사용하세요.")
+        if any(redact_text(arg) != arg or contains_sensitive_data(arg) for arg in command):
+            raise ValueError("검증 명령에 인증 값·비밀값을 직접 넣지 마세요. 신뢰된 환경의 자격증명 경계를 사용하세요.")
         executable = command[0].replace("\\", "/").rsplit("/", 1)[-1].lower().removesuffix(".exe")
         if executable in {"cmd", "powershell", "pwsh", "sh", "bash", "zsh", "fish", "wscript", "cscript"}:
             raise ValueError("검증 명령에서 별도 셸을 실행하지 않습니다.")
@@ -195,8 +231,28 @@ def validate_execution(root, value):
                 raise ValueError("검증 명령은 프로젝트 밖 경로를 참조할 수 없습니다.")
             if candidate.startswith(("state/", "registers/", ".git/", ".codex/", ".claude/", ".agents/")) or candidate in {"project.json", "HANDOFF.md"}:
                 raise ValueError("검증 명령이 관리 제어 파일을 대상으로 할 수 없습니다.")
-    return {"instruction": value["instruction"].strip(), "allowed_paths": [ref.rstrip("/") for ref in value["allowed_paths"]],
-            "expected_outputs": list(outputs), "verification_commands": commands}
+    mode = value.get("verification_mode", "execute")
+    if mode not in {"execute", "artifact_only"}:
+        raise ValueError("검증 방식은 execute 또는 artifact_only입니다.")
+    reason = value.get("verification_reason")
+    if reason is not None and (not isinstance(reason, str) or not reason.strip() or len(reason) > 2000):
+        raise ValueError("검증 정책 사유는 비어 있지 않은 2,000자 이하 문자열이어야 합니다.")
+    if mode == "artifact_only" and (not reason or commands):
+        raise ValueError("artifact_only에는 명시한 검수 사유와 빈 실행 검증 명령이 필요합니다.")
+    if "input_paths" in value:
+        refs = value["input_paths"]
+        if not isinstance(refs, list) or len(refs) > 200 or any(not isinstance(ref, str) or not ref or ref in {".", "./"} for ref in refs) or len(refs) != len(set(refs)):
+            raise ValueError("작업 입력은 고유한 프로젝트 상대 경로 목록이어야 합니다.")
+        for ref in refs:
+            valid_artifact(root, ref.rstrip("/"))
+    if "runtime_ref" in value and (not isinstance(value["runtime_ref"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["runtime_ref"])):
+        raise ValueError("검증 환경은 등록된 64자리 SHA-256 식별자로만 참조합니다.")
+    result = {"instruction": redact_text(value["instruction"].strip()), "allowed_paths": [ref.rstrip("/") for ref in value["allowed_paths"]],
+              "expected_outputs": list(outputs), "verification_commands": commands}
+    for key in ("input_paths", "verification_mode", "verification_reason", "runtime_ref"):
+        if key in value:
+            result[key] = redact_text(value[key]) if key == "verification_reason" else value[key]
+    return result
 
 
 def rework_execution(root, source, paths, feedback):
@@ -207,7 +263,7 @@ def rework_execution(root, source, paths, feedback):
     for relative in paths:
         if not any(relative == prefix.rstrip("/") or relative.startswith(prefix.rstrip("/") + "/") for prefix in allowed):
             allowed.append(relative)
-    return validate_execution(root, {"instruction": instruction, "allowed_paths": allowed, "expected_outputs": list(paths),
+    return validate_execution(root, {**original, "instruction": instruction, "allowed_paths": allowed, "expected_outputs": list(paths),
                                      "verification_commands": original.get("verification_commands", [])})
 
 
@@ -247,6 +303,7 @@ def runner_event(folder, payload):
         raise ValueError("실제 실행기·작업자 PID가 필요합니다.")
     if "notes" in payload and (not isinstance(payload["notes"], str) or len(payload["notes"]) > 10000):
         raise ValueError("실행기 상태 메모는 10,000자 이하 문자열이어야 합니다.")
+    payload = {**payload, **({"notes": redact_text(payload["notes"])} if "notes" in payload else {})}
     root = starter.load_project(folder)[0]
     with lock(root):
         require_revision(root, payload)
@@ -280,11 +337,8 @@ def public_summary(value, limit=1000):
     """Public tool/status summaries only. Never store hidden model reasoning."""
     if not isinstance(value, str) or not value.strip() or len(value) > 10000:
         raise ValueError("활동 요약은 비어 있지 않은 10,000자 이하 문자열이어야 합니다.")
-    value = re.sub(r"(?i)\b(bearer\s+)[A-Za-z0-9_.~+/=-]+", r"\1[redacted]", value)
-    value = re.sub(r"(?i)(\b(?:access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|password|secret|token)\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", value)
-    value = re.sub(r"\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,}|github_pat_[A-Za-z0-9_]{12,})\b", "[redacted]", value)
-    value = re.sub(r"(?i)(https?://[^\s#]+)#\S+", r"\1#[redacted]", value)
-    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", value).strip()[:limit]
+    return redact_text(value).strip()[:limit]
+
 
 
 def activity_event(folder, payload):
@@ -621,7 +675,7 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
             meta = store["tasks"].get(identifier, {})
             stage = meta.get("stage", data["current_stage"])
             valid = runs.valid_step(root, run, step)
-            status = {"succeeded": "done", "skipped": "done", "running": "running", "failed": "blocked",
+            status = {"succeeded": "done", "skipped": "skipped", "running": "running", "failed": "failed",
                       "blocked": "blocked", "awaiting_decision": "awaiting_approval"}.get(step["status"], "todo")
             if step["status"] in {"succeeded", "skipped"} and not valid:
                 status = "stale"
@@ -633,7 +687,7 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
                 "requirement_ids": list(dict.fromkeys(run["requirement_ids"] + previous.get("requirement_ids", []))),
                 "depends_on": list(dict.fromkeys([mapping[s] for s in step["depends_on"]] + meta.get("depends_on", []))),
                 "artefact_ids": [], "start": meta.get("start"), "end": meta.get("end"), "parent_id": meta.get("parent_id"),
-                "progress": 100 if valid else None, "run_id": run["id"], "step_id": step["id"],
+                "progress": 100 if valid and step["status"] == "succeeded" else None, "run_id": run["id"], "step_id": step["id"],
                 "attempts": step["attempts"], "evidence_refs": list(step.get("receipt_hashes", {})),
                 "inputs": step["inputs"], "execution": meta.get("execution"), "repair_checks": meta.get("repair_checks", []),
                 "expected_outputs": list(dict.fromkeys(step.get("expected_outputs", []) + meta.get("execution", {}).get("expected_outputs", []))),
@@ -685,7 +739,7 @@ def ancestors(tasks, identifier):
 
 def blockers(root, store, tasks, identifier):
     parents = ancestors(tasks, identifier)
-    result = [f"선행 작업 {p} 미완료" for p in parents if tasks.get(p, {}).get("status") not in {"done", "awaiting_approval"}]
+    result = [f"선행 작업 {p} 미완료" for p in parents if tasks.get(p, {}).get("status") not in {"done", "skipped", "awaiting_approval"}]
     result += [f"승인 게이트 {g['id']} 대기" for g in store["gates"] if g["task_id"] in parents and g.get("required", True) and gate_status(root, store, g) != "approved"]
     for gate in store["gates"]:
         if gate["task_id"] in parents and not gate.get("required", True) and any(m.get("rework") and m.get("gate_id") == gate["id"] and m.get("status") != "done" for m in store["tasks"].values()):
@@ -711,12 +765,115 @@ def assert_step_allowed(root, run_id, step_id):
 def valid_artifact(root, relative):
     path = confined(root, relative)
     parts = path.relative_to(root).parts
-    if not parts or parts[0] == "state" or set(parts).intersection({".git", ".codex", ".claude", ".aws", ".ssh", ".gnupg", ".azure", ".netrc", ".npmrc", ".pypirc"}) or any(p.startswith(".env") for p in parts):
+    if is_sensitive_path(relative) or not parts or parts[0] == "state" or set(parts).intersection({".git", ".codex", ".claude", ".aws", ".ssh", ".gnupg", ".azure", ".netrc", ".npmrc", ".pypirc"}) or any(p.startswith(".env") for p in parts):
         raise ValueError("제어 기록·인증 자료는 관제 산출물로 열 수 없습니다.")
     return path
 
 
+
+def validate_verification_summary(value):
+    allowed = {"mode", "status", "checks", "manifest_sha", "source"}
+    if not isinstance(value, dict) or set(value) - allowed or value.get("mode") not in {"execute", "artifact_only"} or value.get("status") not in {"passed", "failed", "not_run", "artifact_only", "unknown"}:
+        raise ValueError("검증 요약은 실제 방식·상태·명령 수가 필요합니다.")
+    checks = value.get("checks")
+    if type(checks) is not int or checks < 0 or checks > 30:
+        raise ValueError("검증한 명령 수는 0~30 정수여야 합니다.")
+    if value.get("source") not in {"supervisor", "host-reported"}:
+        raise ValueError("검증 요약의 실제 수집원이 필요합니다.")
+    if value.get("manifest_sha") is not None and not re.fullmatch(r"[0-9a-f]{64}", str(value["manifest_sha"])):
+        raise ValueError("검증 대상 manifest SHA-256이 잘못되었습니다.")
+    if value["status"] == "passed" and (value["mode"] != "execute" or checks == 0 or not value.get("manifest_sha")):
+        raise ValueError("검증 통과에는 실행 명령과 검증 대상 manifest가 필요합니다.")
+    if value["mode"] == "artifact_only" and (checks or value["status"] not in {"artifact_only", "failed", "unknown"}):
+        raise ValueError("문서 기본 검수를 실행 검증 통과로 보고할 수 없습니다.")
+    return dict(value)
+
+
+def _usage_summary(records, commands, activities=()):
+    """Count every observed attempt; a numeric known subtotal is not a total."""
+    grouped = {}
+    for index, record in enumerate(records):
+        command = record.get("command_id") or "unbound"
+        attempt = record.get("attempt_id") or record.get("provider_session_id") or record.get("at") or str(index)
+        grouped[(command, attempt)] = record
+    records = list(grouped.values())
+    total = len(records)
+    for command in commands:
+        matched = [r for r in records if r.get("command_id") == command["id"]]
+        status = command.get("status")
+        if status in {"completed", "failed", "cancelled"} and not matched:
+            total += 1
+        elif status == "running":
+            current = command.get("attempt_id")
+            if not current or not any(r.get("attempt_id") == current for r in matched):
+                total += 1
+    # Native host observations without a queue receipt are still unmetered
+    # executions. Count only explicit lifecycle events, never tool messages.
+    represented = {(c.get("agent_id"), c.get("task_id")) for c in commands}
+    native = {}
+    native_total = 0
+    for event in activities:
+        identity = (event.get("agent_id"), event.get("task_id"))
+        if event.get("command_id") or identity in represented or str(event.get("agent_id", "")).startswith("runner:"):
+            continue
+        kind = event.get("kind")
+        if kind == "started":
+            native_total += 1
+            native[identity] = True
+        elif kind in {"completed", "failed"}:
+            if not native.get(identity):
+                native_total += 1
+            native[identity] = False
+    total += native_total
+    def known(field):
+        return [r[field] for r in records if type(r.get(field)) in (int, float) and math.isfinite(r[field]) and r[field] >= 0]
+    tokens, costs = known("tokens"), known("cost_usd")
+    partial_records = sum(r.get("coverage") in {"partial", "unknown"} for r in records)
+    covered = sum(r.get("tokens") is not None and r.get("cost_usd") is not None and r.get("coverage") not in {"partial", "unknown"} for r in records)
+    complete = total > 0 and covered == total
+    observed = sum(r.get("tokens") is not None or r.get("cost_usd") is not None for r in records)
+    return {"tokens": sum(tokens) if total > 0 and len(tokens) == total and not partial_records else None,
+            "cost_usd": sum(costs) if total > 0 and len(costs) == total and not partial_records else None,
+            "known_tokens": sum(tokens) if tokens else None, "known_cost_usd": sum(costs) if costs else None,
+            "coverage": "known" if complete else ("partial" if observed else "unknown"),
+            "observed_attempts": observed, "total_attempts": total, "unreported_attempts": max(0, total-covered),
+            "tokens_unreported_attempts": max(0, total-len(tokens)), "cost_unreported_attempts": max(0,total-len(costs)),
+            "source": "host-reported" if records else None, "records": records,
+            "scope": "recorded-attempts", "native_unreported_attempts": native_total}
+
+
+def _summary_counts(tasks):
+    values = list(tasks)
+    counts = {"total": len(values), "completed": 0, "excluded": 0, "running": 0, "failed": 0,
+              "blocked": 0, "pending": 0, "waiting": 0, "stale": 0}
+    for task in values:
+        status = task.get("status")
+        if status in {"done", "succeeded"}: counts["completed"] += 1
+        elif status == "skipped": counts["excluded"] += 1
+        elif status in {"running", "doing", "verifying"}: counts["running"] += 1
+        elif status == "failed": counts["failed"] += 1
+        elif status == "blocked": counts["blocked"] += 1
+        elif status == "stale": counts["stale"] += 1
+        else:
+            counts["waiting"] += 1
+            if status not in {"awaiting_approval", "awaiting_decision"}: counts["pending"] += 1
+    counts["applicable"] = counts["total"]-counts["excluded"]
+    counts["completion_percent"] = round(counts["completed"] / counts["applicable"] * 100) if counts["applicable"] else None
+    return counts
+
+
+def _verification_for_task(task, commands):
+    if task.get("status") == "stale":
+        return {"mode": (task.get("execution") or {}).get("verification_mode", "execute"), "status": "stale", "checks": 0, "source": None}
+    latest = commands[-1] if commands else {}
+    if latest.get("verification_summary"):
+        return dict(latest["verification_summary"])
+    return {"mode": (task.get("execution") or {}).get("verification_mode", "execute"),
+            "status": "not_run" if not commands and task.get("status") in {"todo", "skipped"} else "unknown", "checks": 0, "source": None}
+
+
 @consistent_read
+@snapshot_hash_scope
 def snapshot(folder):
     root, data, tables = lifecycle.bundle(folder)
     store = read(root)
@@ -728,7 +885,10 @@ def snapshot(folder):
         identifier = "file:" + relative
         if identifier not in artefacts:
             artefacts[identifier] = {"id": identifier, "path": relative, "title": title or Path(relative).name,
-                "exists": path.is_file(), "sha256": file_hash(root, relative), "task_ids": [], "requirement_ids": []}
+                "exists": path.is_file(), "sha256": file_hash(root, relative), "task_ids": [], "requirement_ids": [],
+                "size_bytes": path.stat().st_size if path.is_file() else None,
+                "preview_kind": "pdf" if path.suffix.lower() == ".pdf" else ("image" if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else ("text" if path.suffix.lower() in {".md", ".txt", ".py", ".ts", ".tsx", ".json", ".csv", ".sql"} else "none")),
+                "download_allowed": path.is_file() and not is_sensitive_path(relative)}
         item = artefacts[identifier]
         if task_id and task_id not in item["task_ids"]:
             item["task_ids"].append(task_id)
@@ -816,6 +976,12 @@ def snapshot(folder):
         commands = [c for c in store["queue"] if c["task_id"] == task["id"]]
         task["actual_start"] = next((c["started_at"] for c in commands if c.get("started_at")), None)
         task["actual_end"] = next((c["completed_at"] for c in reversed(commands) if c.get("completed_at")), None)
+        if commands and commands[-1].get("status") == "failed" and task["status"] in {"todo", "blocked"}:
+            task["status"] = "failed"
+            task["blocked_reason"] = commands[-1].get("notes") or "실제 실행이 실패했습니다."
+            task["ready"] = False
+        task["verification"] = _verification_for_task(task, commands)
+        task["verification_status"] = task["verification"]["status"]
     now = datetime.now(timezone.utc)
     agents = []
     for item in store["agents"].values():
@@ -844,17 +1010,23 @@ def snapshot(folder):
         "requirements": [{"id": r["requirement_id"], "title": r["description"], "status": r["status"], "source": r["source"]} for r in tables["requirements"]],
         "edges": edges, "gates": gates, "reviews": store["reviews"], "policy": store["policy"], "view_mode": store["policy"].get("view_mode", "observer"), "events": lifecycle.events(root)[-100:], "feedback": store["feedback"],
         "commands": store["queue"], "runners": runners, "archived_steps": list(store["superseded_steps"].values()),
-        "usage": {"tokens": sum(u["tokens"] for u in usage) if usage and all(u.get("tokens") is not None for u in usage) else None,
-                  "cost_usd": sum(u["cost_usd"] for u in usage) if usage and all(u.get("cost_usd") is not None for u in usage) else None,
-                  "source": "host-reported" if usage else None, "records": usage},
+        "usage": _usage_summary(usage, store["queue"], activity_read(root)["events"]), "summary_counts": _summary_counts(tasks.values()),
         "capabilities": {"approve": True, "revision": True, "host_connected": runner_connected or any(a["status"] != "disconnected" for a in agents)},
         "host": {"connected": runner_connected or any(a["status"] != "disconnected" for a in agents), "runner_connected": runner_connected, "queued": sum(q["status"] == "queued" for q in store["queue"])}}
     enrich_activity(root, result)
+    native_reported = any(not a["id"].startswith("runner:") for a in result["agents"])
+    native_connected = any(not a["id"].startswith("runner:") and a.get("status") != "disconnected" for a in result["agents"])
+    execution_mode = ("mixed" if native_connected and runner_connected else
+                      "cli" if runner_connected else "native" if native_connected else
+                      "native" if native_reported else "cli" if runners else "unconnected")
+    result["host"].update(data_connected=True, execution_mode=execution_mode, native_connected=native_connected,
+        native_stale_seconds=90, runner_stale_seconds=RUNNER_STALE_SECONDS,
+        latest_activity_at=result["activities"][-1]["at"] if result["activities"] else None)
     result["captured_at"] = result["capturedAt"]
     result["relations"] = result["edges"]
     result["logs"] = [{**e, "message": e["action"] + " · " + json.dumps(e.get("details", {}), ensure_ascii=False)} for e in result["events"]]
     result["usage"]["cost"] = result["usage"]["cost_usd"]
-    return result
+    return redact_value(result)
 
 
 def configure(folder, payload, actor="agent"):
@@ -867,10 +1039,19 @@ def configure(folder, payload, actor="agent"):
         store = read(root)
         if "policy" in payload:
             policy = payload["policy"]
-            if not isinstance(policy, dict) or set(policy) - {"view_mode", "auto_run"}:
+            if not isinstance(policy, dict) or set(policy) - {"view_mode", "auto_run", "limits"}:
                 raise ValueError("관제 정책 필드가 잘못되었습니다.")
             if policy.get("view_mode", "observer") not in {"observer", "observe", "review"} or ("auto_run" in policy and type(policy["auto_run"]) is not bool):
                 raise ValueError("관제 정책은 observe/review와 auto_run 불리언을 사용합니다.")
+            if "limits" in policy:
+                limits = policy["limits"]
+                if not isinstance(limits, dict) or set(limits) - {"max_tokens", "max_cost_usd", "max_seconds", "unknown_usage"}:
+                    raise ValueError("실행 한도 필드가 잘못되었습니다.")
+                for name in ("max_tokens", "max_cost_usd", "max_seconds"):
+                    if name in limits and (type(limits[name]) not in (int, float) or not math.isfinite(limits[name]) or limits[name] <= 0 or (name == "max_tokens" and type(limits[name]) != int)):
+                        raise ValueError("실행 한도는 양수여야 하며 토큰은 정수여야 합니다.")
+                if limits.get("unknown_usage", "stop") not in {"stop", "warn"}:
+                    raise ValueError("미집계 사용량 정책은 stop 또는 warn입니다.")
             store["policy"].update(policy)
             if store["policy"].get("view_mode") == "observe":
                 store["policy"]["view_mode"] = "observer"
@@ -896,6 +1077,8 @@ def configure(folder, payload, actor="agent"):
                         raise ValueError("일정은 ISO 날짜/시간이어야 합니다.") from None
             if meta.get("start") and meta.get("end") and meta["start"] > meta["end"]:
                 raise ValueError("종료 일정이 시작보다 빠릅니다.")
+            if "title" in meta:
+                meta["title"] = redact_text(meta["title"])
             if "execution" in meta:
                 meta["execution"] = validate_execution(root, meta["execution"])
             if "step_ref" in meta:
@@ -1088,7 +1271,7 @@ def materialize_run_generation(root, data, tables, store, task):
 
 
 def validate_usage(usage):
-    allowed = {"tokens", "cost_usd", "model", "source", "attempt_id", "provider_session_id"}
+    allowed = {"tokens", "cost_usd", "model", "source", "attempt_id", "provider_session_id", "coverage"}
     if not isinstance(usage, dict) or set(usage) - allowed or not isinstance(usage.get("source"), str) or not usage["source"].strip():
         raise ValueError("사용량 수집원과 허용된 필드가 필요합니다.")
     for field in ("tokens", "cost_usd"):
@@ -1098,6 +1281,8 @@ def validate_usage(usage):
     for field in ("model", "attempt_id", "provider_session_id"):
         if usage.get(field) is not None and (not isinstance(usage[field], str) or len(usage[field]) > 1000):
             raise ValueError("사용량의 모델·실행 식별자는 문자열이어야 합니다.")
+    if usage.get("coverage") not in {None, "complete", "known", "partial", "unknown"}:
+        raise ValueError("사용량 수집 완전성 값이 잘못되었습니다.")
     return dict(usage)
 
 
@@ -1126,6 +1311,7 @@ def decide(folder, payload, actor=None):
         raise ValueError("수정 요청에는 대상·사유·수용 기준을 입력하세요.")
     root, data, tables = lifecycle.bundle(folder)
     signature = digest(json_bytes({k: v for k, v in payload.items() if k != "expected_revision"}))
+    payload = {**payload, "feedback": redact_text(payload["feedback"])}
     with lock(root):
         root, data, tables = lifecycle.bundle(root)
         store = read(root)
@@ -1244,7 +1430,7 @@ def host_event(folder, payload):
     report the observed execution here. Register-only tasks require actual
     output hashes and update the CSV in the same transaction as their receipt.
     """
-    allowed = {"expected_revision", "kind", "agent_id", "provider", "role", "task_id", "command_id", "notes", "evidence_refs", "usage"}
+    allowed = {"expected_revision", "kind", "agent_id", "provider", "role", "task_id", "command_id", "notes", "evidence_refs", "usage", "verification_summary", "verified_outputs"}
     if not isinstance(payload, dict) or set(payload) - allowed or payload.get("kind") not in {"heartbeat", "claim", "started", "completed", "failed", "retry"}:
         raise ValueError("호스트 이벤트 필드를 확인하세요.")
     for key in ("agent_id", "provider", "role"):
@@ -1252,6 +1438,7 @@ def host_event(folder, payload):
             raise ValueError("실제 작업자 ID·호스트·역할이 필요합니다.")
     if "notes" in payload and (not isinstance(payload["notes"], str) or len(payload["notes"]) > 10000):
         raise ValueError("호스트 로그는 10,000자 이하의 문자열이어야 합니다.")
+    payload = {**payload, **({"notes": redact_text(payload["notes"])} if "notes" in payload else {})}
     root, data, tables = lifecycle.bundle(folder)
     with lock(root):
         root, data, tables = lifecycle.bundle(root)
@@ -1302,7 +1489,8 @@ def host_event(folder, payload):
                     raise Conflict("실행 요청의 임대가 만료됐습니다. 다시 claim하세요.")
                 if task.get("run_id") and task["status"] != "running":
                     raise Conflict("기존 엔진의 run-result running 영수증을 먼저 기록하세요.")
-                command.update(status="running", started_at=now,
+                command.update(status="running", started_at=now, attempt_id="ATT-" + uuid.uuid4().hex,
+                    attempt_number=command.get("attempt_number", 0) + 1,
                     approved_gate_hashes={g["id"]: version_hashes(root, g) for g in store["gates"] if g["task_id"] in ancestors(tasks, task["id"])},
                     approved_gate_contexts={g["id"]: context_hash(root, store, g) for g in store["gates"] if g["task_id"] in ancestors(tasks, task["id"])},
                     input_hashes={p: file_hash(root, p) for p in task.get("inputs", []) if confined(root, p).is_file()})
@@ -1316,6 +1504,22 @@ def host_event(folder, payload):
             elif payload["kind"] == "completed":
                 if command["status"] != "running":
                     raise Conflict("실제 시작 이벤트가 필요합니다.")
+                supplied_verification = validate_verification_summary(payload["verification_summary"]) if payload.get("verification_summary") is not None else None
+                verified_outputs = payload.get("verified_outputs")
+                if supplied_verification and supplied_verification["source"] == "supervisor" and supplied_verification["status"] in {"passed", "artifact_only"} and not verified_outputs:
+                    raise ValueError("감독자 검증 완료에는 실제 출력의 해시·크기 영수증이 필요합니다.")
+                if verified_outputs is not None:
+                    if not isinstance(verified_outputs, dict) or not verified_outputs or len(verified_outputs) > 10000:
+                        raise ValueError("검증된 출력 목록의 형식이 잘못되었습니다.")
+                    if not set(task.get('expected_outputs', [])).issubset(verified_outputs):
+                        raise ValueError('계획한 산출물 전체가 검증된 출력 영수증에 필요합니다.')
+                    owned_paths = (task.get('execution') or {}).get('allowed_paths', [])
+                    for relative, record in verified_outputs.items():
+                        if not any(relative == owned.rstrip('/') or relative.startswith(owned.rstrip('/') + '/') for owned in owned_paths):
+                            raise ValueError('검증된 출력이 담당 범위 밖입니다.')
+                        path = execution_path(root, relative)
+                        if not isinstance(record, dict) or set(record) != {"sha256", "bytes"} or not path.is_file() or file_hash(root, relative) != record["sha256"] or path.stat().st_size != record["bytes"]:
+                            raise Conflict("검증한 산출물이 완료 기록 전에 변경됐습니다.")
                 receipts = runs.hashes(root, payload.get("evidence_refs", []))
                 if not receipts or not set(task.get("expected_outputs", [])).issubset(receipts):
                     raise ValueError("계획한 출력의 실제 완료 근거가 필요합니다.")
@@ -1368,9 +1572,12 @@ def host_event(folder, payload):
                     row = next(r for r in tables["tasks"] if r["task_id"] == task["id"])
                     row["status"] = "blocked"
                     extra["registers/tasks.csv"] = lifecycle.table_bytes(root, "tasks", tables["tasks"])
-        if payload["kind"] in {"completed", "failed"} and payload.get("usage") is not None:
-            usage = validate_usage(payload["usage"])
-            store["usage"].append({**usage, "agent_id": agent["id"], "command_id": command["id"], "outcome": payload["kind"], "at": now})
+        if payload["kind"] in {"completed", "failed"}:
+            usage = validate_usage(payload["usage"]) if payload.get("usage") is not None else {"tokens": None, "cost_usd": None, "source": "unreported", "coverage": "unknown"}
+            store["usage"].append({**usage, "attempt_id": usage.get("attempt_id") or command.get("attempt_id") or "ATT-"+uuid.uuid4().hex,
+                "agent_id": agent["id"], "command_id": command["id"], "outcome": payload["kind"], "at": now})
+            if payload.get("verification_summary") is not None:
+                command["verification_summary"] = validate_verification_summary(payload["verification_summary"])
         if payload["kind"] == "heartbeat" and not payload.get("notes"):
             # Runtime liveness is not a business edit and must not duplicate
             # large approval snapshots in history or stale a human's revision.

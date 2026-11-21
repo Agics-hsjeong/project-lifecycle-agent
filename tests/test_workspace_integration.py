@@ -297,7 +297,7 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.assertTrue(any(q["task_id"] == final_task for q in queued), "Finishing a ready task must schedule the next dependency level")
 
 
-    def test_failed_real_host_task_is_blocked_and_retryable(self):
+    def test_failed_real_host_task_is_failed_and_retryable(self):
         lifecycle.apply_patch(self.root, {"expected_revision": self.rev(), "tasks": [
             {"task_id": self.producer, "status": "done", "evidence_refs": "src/contract.py"}]})
         status, data = self.request("/api/action", self.decision(action_id="synthetic-failure-path"))
@@ -308,7 +308,8 @@ class WorkspaceIntegrationTests(unittest.TestCase):
         self.host_request("started", command_id=command["id"])
         failed = self.host_request("failed", command_id=command["id"], notes="Synthetic execution failure: API unavailable")
         task = next(t for t in failed["snapshot"]["tasks"] if t["id"] == self.consumer)
-        self.assertEqual(task["status"], "blocked")
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(failed["snapshot"]["summary_counts"]["failed"], 1)
         self.assertFalse(any(a["status"] == "running" for a in failed["snapshot"]["agents"]))
         self.host_request("retry", command_id=command["id"], notes="Synthetic retry after availability recovery")
         claim = self.host_request("claim", task_id=self.consumer)

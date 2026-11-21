@@ -1,10 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalise } from "../src/workspace/model.ts";
+import {
+  normalise,
+  completed,
+  excluded,
+  settled,
+} from "../src/workspace/model.ts";
 import {
   LatestRequest,
   isSnapshotBusy,
 } from "../src/workspace/request-state.ts";
+import {
+  taskSummary,
+  verificationOf,
+  usageCoverage,
+} from "../src/workspace/model.ts";
 const fixture = () => ({
   schema_version: 1,
   revision: "r1",
@@ -180,4 +190,94 @@ test("network, invalid data and unknown 409 responses are not treated as ledger 
     { status: 400, code: "invalid_request" },
   ])
     assert.equal(isSnapshotBusy(error, true), false);
+});
+
+test("scope progress separates completed, excluded, failed and ordinary waiting", () => {
+  const make = (id, status) => ({
+    ...normalise(fixture()).tasks[0],
+    id,
+    status,
+  });
+  const tasks = [
+    make("done", "done"),
+    make("excluded", "skipped"),
+    make("error", "failed"),
+  ];
+  assert.deepEqual(taskSummary(tasks), {
+    total: 3,
+    applicable: 2,
+    done: 1,
+    excluded: 1,
+    active: 0,
+    attention: 1,
+    waiting: 0,
+    percent: 50,
+  });
+  assert.equal(completed(tasks[1]), false);
+  assert.equal(excluded(tasks[1]), true);
+  assert.equal(settled(tasks[1]), true);
+  assert.equal(taskSummary([tasks[1]]).percent, null);
+  assert.equal(taskSummary([]).percent, null);
+});
+test("task completion never invents a passed verification result", () => {
+  const task = { ...normalise(fixture()).tasks[0], status: "done" };
+  assert.equal(verificationOf(task).state, "unknown");
+  assert.equal(
+    verificationOf({ ...task, verification: { status: "passed", checks: 0 } })
+      .state,
+    "unknown",
+  );
+  assert.equal(
+    verificationOf({ ...task, verification: { status: "passed", checks: 1, source: "supervisor" } })
+      .state,
+    "passed",
+  );
+  assert.equal(
+    verificationOf({
+      ...task,
+      verification: { status: "artifact_only", mode: "artifact_only" },
+    }).state,
+    "artefact_only",
+  );
+  assert.equal(
+    verificationOf({
+      ...task,
+      status: "stale",
+      verification: { status: "passed" },
+    }).state,
+    "unknown",
+  );
+});
+test("host-reported verification never claims independent supervisor checks", () => {
+  const task = { ...normalise(fixture()).tasks[0], status: "done" };
+  assert.deepEqual(verificationOf({ ...task, verification: { status: "passed", checks: 2, source: "host-reported" } }),
+    { state: "host_reported", label: "호스트 검증 보고" });
+  assert.deepEqual(verificationOf({ ...task, verification: { status: "passed", checks: 2 } }),
+    { state: "unknown", label: "검증 출처 미보고" });
+  assert.equal(verificationOf({ ...task, verification: { status: "passed", checks: 2, source: "untrusted" } }).state, "unknown");
+});
+test("partial usage is an observed subtotal with unreported attempts", () => {
+  const raw = fixture();
+  raw.usage = {
+    tokens: null,
+    cost: null,
+    known_tokens: 100,
+    known_cost_usd: 0.1,
+    coverage: "partial",
+    observed_attempts: 1,
+    total_attempts: 2,
+    unreported_attempts: 1,
+  };
+  const s = normalise(raw);
+  assert.equal(s.usage.tokens, null);
+  assert.equal(s.usage.known_tokens, 100);
+  assert.match(usageCoverage(s), /미집계 1회/);
+});
+test("invalid verification and usage coverage render fields are rejected", () => {
+  const raw = fixture();
+  raw.tasks[0].verification = { status: { invalid: true } };
+  assert.throws(() => normalise(raw), /스냅샷/);
+  const second = fixture();
+  second.usage.unreported_attempts = -1;
+  assert.throws(() => normalise(second), /스냅샷/);
 });

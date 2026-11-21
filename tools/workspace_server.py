@@ -120,7 +120,7 @@ class Handler(BaseHTTPRequestHandler):
         # Never log request headers, tokens or customer file contents.
         return
 
-    def respond(self, code, body, content_type="application/json; charset=utf-8"):
+    def respond(self, code, body, content_type="application/json; charset=utf-8", headers=None):
         if isinstance(body, (dict, list)):
             body = json_bytes(body)
         elif isinstance(body, str):
@@ -132,7 +132,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("X-Frame-Options", "DENY")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+        for name, value in (headers or {}).items():
+            if name not in {"Content-Disposition", "X-Content-SHA256"}:
+                continue
+            self.send_header(name, value)
+        self.send_header("Content-Security-Policy", (headers or {}).get("Content-Security-Policy") or "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self'; worker-src 'self' blob:; frame-src blob:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
         try:
             self.end_headers()
             if self.command != "HEAD":
@@ -178,6 +182,14 @@ class Handler(BaseHTTPRequestHandler):
                 if route in {"/api/snapshot", "/api/host/snapshot"}:
                     value = _read_with_lock_grace(self.server.project, lambda: workspace.snapshot(self.server.project)) if route == "/api/snapshot" else workspace.snapshot(self.server.project)
                     self.respond(200, _snapshot_with_supervisor(self.server, value))
+                elif route == "/api/artefact":
+                    from tools import artefact_delivery
+                    query = parse_qs(urlparse(self.path).query, keep_blank_values=True)
+                    if set(query) != {"id", "sha256"} or any(len(values) != 1 for values in query.values()):
+                        raise ValueError("하나의 산출물 ID와 SHA-256이 필요합니다.")
+                    delivered = _read_with_lock_grace(self.server.project, lambda: artefact_delivery.get(
+                        self.server.project, query["id"][0], query["sha256"][0]))
+                    self.respond(200, delivered["body"], delivered["content_type"], delivered["headers"])
                 elif route == "/api/diff":
                     query = parse_qs(urlparse(self.path).query)
                     if set(query) != {"path"} or len(query["path"]) != 1:
@@ -251,7 +263,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def failure(self, exc):
         conflict = isinstance(exc, workspace.Conflict) or "잠금" in str(exc)
-        self.respond(409 if conflict else 400, {"error": str(exc), "code": "conflict" if conflict else "invalid_request"})
+        status = getattr(exc, "status", 409 if conflict else 400)
+        self.respond(status, {"error": workspace.public_summary(str(exc)), "code": "conflict" if status == 409 else "invalid_request"})
 
 
 def make_server(folder, host="127.0.0.1", port=0, assets=None):
