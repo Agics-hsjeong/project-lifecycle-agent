@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -104,6 +105,13 @@ class ExecutorIntegrationTests(unittest.TestCase):
     def wait_until(self, predicate, timeout=8):
         until = time.monotonic() + timeout
         while time.monotonic() < until:
+            for _, _, errors in self.runners:
+                for error in errors:
+                    if not isinstance(error, workspace_runner.RunnerAlreadyRunning):
+                        summary = workspace.public_summary(str(error) or type(error).__name__)
+                        summary = summary.replace(str(self.root), '<synthetic-project>').replace(str(self.temp.name), '<synthetic-temp>')
+                        self.fail('Automatic executor stopped: ' + type(error).__name__ + ': ' + summary +
+                                  ' [' + ', '.join(getattr(error, 'fixture_frames', [])) + ']')
             if predicate():
                 return
             time.sleep(0.025)
@@ -174,6 +182,8 @@ class ExecutorIntegrationTests(unittest.TestCase):
                 workspace_runner.run_forever(self.root, provider, stop_event=stop, poll_interval=0.1,
                     provider_options={"run_job": self.fake_provider, "job_root": str(Path(self.temp.name) / "private-jobs")})
             except Exception as error:
+                error.fixture_frames = [Path(frame.filename).name + ':' + str(frame.lineno) + ':' + frame.name
+                                        for frame in traceback.extract_tb(error.__traceback__)]
                 errors.append(error)
         thread = threading.Thread(target=target, daemon=True)
         self.runners.append((stop, thread, errors))

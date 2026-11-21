@@ -267,6 +267,9 @@ class RealVerificationSandboxTests(SandboxFixture, unittest.TestCase):
 
     def test_real_os_blocks_home_project_writes_network_and_runtime_tamper(self):
         (self.project / "synthetic.txt").write_text("synthetic original input", encoding="utf-8")
+        outside = self.base / 'outside.txt'
+        outside.write_text('synthetic private host sentinel', encoding='utf-8')
+        outside_before = outside.read_bytes()
         with tempfile.TemporaryDirectory(prefix="ieum-home-boundary-") as home_temp:
             home_file = Path(home_temp) / "synthetic.txt"
             home_file.write_text("synthetic home input", encoding="utf-8")
@@ -276,14 +279,18 @@ class RealVerificationSandboxTests(SandboxFixture, unittest.TestCase):
             source += " def test_copy_write(self):\n  p=Path('inside.txt');p.write_text('inside');self.assertEqual(p.read_text(),'inside')\n"
             source += " def test_original_read(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(self.project/'synthetic.txt'))+").read_bytes()\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.ENOENT})\n"
             source += " def test_home_read(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(home_file))+").read_bytes()\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.ENOENT})\n"
-            source += " def test_outside_write(self):\n  with self.assertRaises(OSError) as denied: Path("+repr(str(self.base/'outside.txt'))+").write_text('outside')\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.EROFS,errno.ENOENT})\n"
+            # Linux may create private tmpfs ancestor directories to mount the
+            # candidate. A same-named shadow file there cannot modify the host.
+            # Verify both that host contents are unreadable and that the actual
+            # pre-existing host sentinel remains unchanged after execution.
+            source += " def test_outside_host_write(self):\n  p=Path("+repr(str(outside))+")\n  with self.assertRaises(OSError) as denied: p.read_bytes()\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.ENOENT})\n  try: p.write_text('outside')\n  except OSError as blocked: self.assertIn(blocked.errno,{errno.EACCES,errno.EPERM,errno.EROFS,errno.ENOENT})\n  else: self.assertEqual(p.read_text(),'outside')\n"
             source += " def test_network(self):\n  with self.assertRaises(OSError) as denied: socket.create_connection(('127.0.0.1',9),timeout=.5)\n  self.assertNotIn(denied.exception.errno,{errno.ECONNREFUSED})\n"
             source += " def test_runtime_readonly(self):\n  with self.assertRaises(OSError) as denied: Path(sys.executable).parent.joinpath('tamper.txt').write_text('tamper')\n  self.assertIn(denied.exception.errno,{errno.EACCES,errno.EPERM,errno.EROFS})\n"
             (tests/"test_boundaries.py").write_text(source, encoding="utf-8")
             code, info = self.execute([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"])
         self.assertEqual(code, 0, (self.base/"actual.stderr").read_text(encoding="utf-8"))
         self.assertTrue((self.copy/"inside.txt").is_file())
-        self.assertFalse((self.base/"outside.txt").exists())
+        self.assertEqual(outside.read_bytes(), outside_before)
         self.assertEqual(info["backend"], "codex-sandbox-mxc" if os.name == "nt" else "codex-sandbox")
 
     def test_real_generated_escape_test_fails_and_nothing_is_published(self):

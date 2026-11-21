@@ -56,3 +56,5 @@ Codex·Claude Code에서 실제 프로젝트를 열고 말하세요.
 프로젝트 데이터 수신과 실제 실행기 연결은 따로 표시합니다. 실행기 시작이 지연되거나 실패하면 그 이유를 확인할 수 있습니다. 원장을 기록하는 동안 잠시 조회가 대기하면 마지막 정상 화면과 수신 시각을 유지하고 다음 조회에서 자동 복구합니다. 파일이 바뀌면 열린 Diff도 다시 불러옵니다.
 
 별도 CLI 자동 실행기의 독립 검증은 로컬 Codex sandbox 도구를 사용하며 모델 API를 호출하지 않습니다. Claude 실행기에서도 같은 검증 도구가 필요하고 Windows는 MXC 지원이 필요합니다. 환경 준비는 에이전트가 확인합니다. 사용할 수 없는 격리를 비격리 검증으로 바꾸거나 검증 완료로 표시하지 않습니다.
+
+Windows 독립 검증은 MXC의 Process Isolation API를 제공하는 Windows 11 환경이 필요합니다. 검증 기준인 Codex 0.170.0의 SDK는 24H2 빌드 26100.9278 이상 또는 25H2 빌드 26200.9278 이상을 명시합니다. Windows Server는 지원 환경으로 간주하지 않으며, 실제 API 사용 가능 여부를 실행 시 확인합니다. [MXC 지원 운영체제](https://github.com/microsoft/mxc/blob/b21120168d70befe12356411423266bfef168446/docs/backends/process-container/os-version-support.md)를 참고하세요.

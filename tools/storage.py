@@ -63,12 +63,25 @@ def confined(root, relative):
     if rel.is_absolute() or ".." in rel.parts:
         raise ValueError("프로젝트 외부 경로는 허용하지 않습니다.")
     path = root / rel
-    if not _containment_path(path.resolve()).is_relative_to(_containment_path(root)):
-        raise ValueError("경로가 프로젝트 밖을 가리킵니다.")
+    for attempt in range(5):
+        resolved = _containment_path(path.resolve())
+        if resolved.is_relative_to(_containment_path(root)):
+            break
+        # A handle opened just before unlink can resolve to NTFS's private
+        # delete-pending tombstone. Never accept that path: re-query the original
+        # name and still require its resolved destination to be inside root.
+        deleted = (os.name == 'nt' and isinstance(resolved, PureWindowsPath)
+                   and tuple(part.casefold() for part in resolved.parts[1:3]) == ('$extend', '$deleted'))
+        if not deleted or attempt == 4:
+            raise ValueError("경로가 프로젝트 밖을 가리킵니다.")
+        time.sleep(0.002)
     # Do not mutate through links, including links back into the same project.
     current = path
     while current != root:
-        attributes = getattr(current.lstat(), "st_file_attributes", 0) if current.exists() else 0
+        try:
+            attributes = getattr(current.lstat(), "st_file_attributes", 0)
+        except FileNotFoundError:
+            attributes = 0  # The exact file may disappear during an atomic replace.
         if current.is_symlink() or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
             raise ValueError("연결된 경로에는 기록할 수 없습니다.")
         current = current.parent

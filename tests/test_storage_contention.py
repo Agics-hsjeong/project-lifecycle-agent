@@ -122,3 +122,37 @@ class StorageContentionTests(unittest.TestCase):
         self.assertEqual(result, target)
         self.assertTrue(result.samefile(target))
         self.assertEqual(len(calls), 2)
+
+    @unittest.skipUnless(os.name == "nt", "Windows NTFS delete-pending final name")
+    def test_deleted_ntfs_final_name_is_requeried_and_never_accepted(self):
+        target = self.root / 'inside.txt'
+        target.write_text('Synthetic file', encoding='utf-8')
+        resolve = Path.resolve
+        tombstone = Path(self.root.anchor) / '$Extend/$Deleted/synthetic-tombstone'
+        calls = []
+        def deleted(path, *args, **kwargs):
+            if path == target:
+                calls.append(1)
+                if len(calls) == 1:
+                    return tombstone
+            return resolve(path, *args, **kwargs)
+        with patch.object(Path, 'resolve', deleted):
+            self.assertEqual(storage.confined(self.root, 'inside.txt'), target)
+        self.assertEqual(len(calls), 2)
+        with patch.object(Path, 'resolve', lambda path,*a,**kw: tombstone if path == target else resolve(path,*a,**kw)):
+            with self.assertRaisesRegex(ValueError, '프로젝트 밖'):
+                storage.confined(self.root, 'inside.txt')
+        outside = self.root.parent / 'outside.txt'
+        with patch.object(Path, 'resolve', lambda path,*a,**kw: outside if path == target else resolve(path,*a,**kw)):
+            with self.assertRaisesRegex(ValueError, '프로젝트 밖'):
+                storage.confined(self.root, 'inside.txt')
+
+    def test_disappearing_file_during_link_query_keeps_parent_checks(self):
+        target = self.root / 'inside.txt'
+        lstat = Path.lstat
+        def removed(path, *args, **kwargs):
+            if path == target:
+                raise FileNotFoundError(2, 'Synthetic atomic replacement', str(path))
+            return lstat(path, *args, **kwargs)
+        with patch.object(Path, 'lstat', removed):
+            self.assertEqual(storage.confined(self.root, 'inside.txt'), target)

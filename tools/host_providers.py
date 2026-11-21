@@ -256,7 +256,7 @@ def _process(command, cwd, stdin, stdout, stderr, timeout, on_started=None, on_h
     write_errors = []
     try:
         with Path(stdout).open('w', encoding='utf-8') as out, Path(stderr).open('w', encoding='utf-8') as err:
-            process = subprocess.Popen(command, cwd=cwd, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
+            process = subprocess.Popen(tree.command(command), cwd=cwd, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
                                        stdout=out, stderr=err, text=True, encoding='utf-8', env=env, shell=False, **tree.popen_options)
             tree.attach(process)
             if on_started:
