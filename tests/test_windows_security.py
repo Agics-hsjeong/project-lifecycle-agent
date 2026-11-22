@@ -304,6 +304,8 @@ class WindowsSecurityTests(unittest.TestCase):
         self.assert_original()
 
     def test_security_guard_prevents_temp_name_swap_during_policy_application(self):
+        self.api.set_dacl(self.target, "O:" + self.writer + "G:BAD:P(A;;0x1f01ff;;;OW)")
+        self.original_security = security.read_security(self.target)
         temp = self.empty_temp()
         moved = self.root / "must-not-replace-security-stage"
         original_apply = security._apply
@@ -325,6 +327,8 @@ class WindowsSecurityTests(unittest.TestCase):
         self.assert_original()
 
     def test_dacl_application_failure_never_writes_payload_or_replaces_original(self):
+        self.api.set_dacl(self.target, "O:" + self.writer + "G:BAD:P(A;;0x1f01ff;;;OW)")
+        self.original_security = security.read_security(self.target)
         failure = PermissionError(errno.EACCES, "Synthetic DACL application failure")
         staged = []
         def fail(path, aces, protected, advapi, kernel):
@@ -394,10 +398,17 @@ class WindowsSecurityTests(unittest.TestCase):
         raw = b"synthetic replacement bytes\n"
         storage.atomic_write(self.target, raw, security_anchor=self.root)
         after = self.api.policy(self.api.read(self.target))
-        expected = [{**ace, "sid": self.writer if ace["sid"] == "S-1-3-4" and ace["mask"] else ace["sid"]} for ace in before["aces"]]
-        if any(a["sid"] == "S-1-3-4" and a["mask"] for a in before["aces"]) and not any(a["sid"] == "S-1-3-4" and not a["mask"] for a in expected):
-            expected.append({"type": 0, "flags": 0, "mask": 0, "sid": "S-1-3-4"})
-        self.assertEqual(after["aces"], expected)
+        original = [a for a in before["aces"] if a["sid"] != "S-1-3-4" or not a["mask"]]
+        remaining = iter(after["aces"])
+        for ace in original:
+            self.assertTrue(any(item == ace for item in remaining), "every original non-OW ACE must keep its order")
+        pinned = [{**a, "sid": self.writer} for a in before["aces"] if a["sid"] == "S-1-3-4" and a["mask"]]
+        for ace in pinned:
+            self.assertIn(ace, after["aces"], "the old owner's exact rights must persist even when an identical ACE already exists")
+        marker = {"type": 0, "flags": 0, "mask": 0, "sid": "S-1-3-4"}
+        if pinned:
+            self.assertIn(marker, after["aces"])
+        self.assertTrue(all(a in original + pinned + [marker] for a in after["aces"]))
         self.assertEqual(after["protected"], before["protected"])
         self.assertEqual(self.target.read_bytes(), raw)
         self.assertEqual(list(self.root.glob(".write-*")), [])
@@ -941,13 +952,13 @@ class WindowsManagedProjectAccessTests(unittest.TestCase):
 
     def test_new_nested_directories_are_empty_when_secured_and_keep_host_listing_access(self):
         new = self.root / "new-output/inner"
-        original_apply, observed = security._apply, []
-        def applying(path, aces, protected, advapi, kernel):
+        original_prepare, observed = security.prepare_new_directory, []
+        def preparing(path, anchor):
             observed.append(Path(path))
             self.assertTrue(Path(path).is_dir())
             self.assertEqual(list(Path(path).iterdir()), [])
-            return original_apply(path, aces, protected, advapi, kernel)
-        with patch.object(security, "_apply", applying):
+            return original_prepare(path, anchor)
+        with patch.object(security, "prepare_new_directory", preparing):
             storage.ensure_project_directory(new, self.root)
         self.assertEqual(observed, [new.parent, new])
         for directory in observed:
@@ -976,6 +987,7 @@ class WindowsManagedProjectAccessTests(unittest.TestCase):
     def test_empty_directory_security_guard_blocks_a_real_name_swap(self):
         directory = self.root / "just-created"
         directory.mkdir()
+        self.api.set_dacl(directory, "O:" + self.owner + "G:BAD:P(A;;0x1f01ff;;;OW)")
         moved = self.root / "must-not-be-renamed"
         original_apply, denied = security._apply, []
         def applying(path, aces, protected, advapi, kernel):
@@ -995,7 +1007,7 @@ class WindowsManagedProjectAccessTests(unittest.TestCase):
         directory = self.root / "failed-new/inner"
         before = security.read_security(self.root)
         failure = PermissionError(errno.EACCES, "Synthetic new directory security failure")
-        with patch.object(security, "_apply", side_effect=failure):
+        with patch.object(security, "prepare_new_directory", side_effect=failure):
             with self.assertRaises(PermissionError) as caught:
                 storage.ensure_project_directory(directory, self.root)
         self.assertIs(caught.exception, failure)
@@ -1220,3 +1232,191 @@ class WindowsManagedProjectRepairTests(unittest.TestCase):
         self.assertTrue(result["content_preserved"])
         self.assertTrue(all(not item["repaired"] for item in result["files"]))
         self.assertEqual({relative: ((self.root / relative).read_bytes(), security.read_security(self.root / relative)) for relative in self.paths}, before)
+
+
+@unittest.skipUnless(os.name == "nt", "requires standard Windows automatic inheritance and CREATOR_OWNER mapping")
+class WindowsStandardInheritanceTests(unittest.TestCase):
+    def setUp(self):
+        from ctypes import wintypes as w
+        parent = starter.ROOT / ".test-output"
+        parent.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="beta8-standard-inheritance-", dir=parent)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.api = WinAuthorization()
+        self.owner = self.api.owner(self.api.read(self.root))
+        # Initialize through the modern API so children really have D:AI and
+        # inherited CREATOR_OWNER/generic ACEs, as ordinary Windows CI does.
+        sddl = ("O:" + self.owner + "G:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)"
+                "(A;OICI;FA;;;" + self.owner + ")(A;OICIIO;GA;;;CO)")
+        descriptor = ctypes.create_string_buffer(self.api.descriptor(sddl))
+        acl, present, defaulted = ctypes.c_void_p(), w.BOOL(), w.BOOL()
+        self.api.checked(self.api.advapi.GetSecurityDescriptorDacl(descriptor, ctypes.byref(present), ctypes.byref(acl), ctypes.byref(defaulted)))
+        setting = self.api.advapi.SetNamedSecurityInfoW
+        setting.argtypes = [w.LPWSTR, ctypes.c_int, w.DWORD, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        setting.restype = w.DWORD
+        error = setting(str(self.root), 1, 4 | 0x80000000, None, None, acl, None)
+        if error:
+            raise ctypes.WinError(error)
+
+    def test_no_owner_rights_directory_preserves_entire_standard_inheritance_descriptor(self):
+        directory = self.root / "standard"
+        directory.mkdir()
+        before = self.api.read(directory)
+        policy = self.api.policy(before)
+        self.assertFalse(any(a["sid"] == "S-1-3-4" for a in policy["aces"]))
+        self.assertTrue(any(a["sid"] == "S-1-3-0" and a["mask"] == 0x10000000 for a in policy["aces"]))
+        self.assertIn("D:AI", self.api.sddl(before), "fixture must use automatic inheritance")
+        with patch.object(security, "_apply", side_effect=AssertionError("No owner-rights transformation is needed")) as apply:
+            security.prepare_new_directory(directory, self.root)
+        self.assertEqual(apply.call_count, 0)
+        self.assertEqual(self.api.sddl(self.api.read(directory)), self.api.sddl(before))
+
+    def test_nested_standard_directories_need_no_acl_rewrite(self):
+        directory = self.root / "nested/inner"
+        root_before = self.api.sddl(self.api.read(self.root))
+        with patch.object(security, "_apply", side_effect=AssertionError("Ordinary inherited ACL must stay untouched")) as apply:
+            storage.ensure_project_directory(directory, self.root)
+        self.assertEqual(apply.call_count, 0)
+        self.assertTrue(directory.is_dir())
+        self.assertIn("D:AI", self.api.sddl(self.api.read(directory)))
+        self.assertEqual(self.api.sddl(self.api.read(self.root)), root_before)
+
+    def test_atomic_write_keeps_matching_standard_acl_and_rechecks_final_write_access(self):
+        target = self.root / "standard.txt"
+        target.write_bytes(b"original standard bytes")
+        before = self.api.policy(self.api.read(target))
+        with patch.object(security, "_apply", side_effect=AssertionError("Matching inherited ACL needs no rewrite")) as apply, patch.object(security, "reopen_writable", wraps=security.reopen_writable) as reopen:
+            storage.atomic_write(target, b"new standard bytes", security_anchor=self.root)
+        self.assertEqual(apply.call_count, 0)
+        self.assertEqual(reopen.call_count, 1, "a no-op must still reauthorize payload writing")
+        self.assertEqual(target.read_bytes(), b"new standard bytes")
+        after = self.api.policy(self.api.read(target))
+        self.assertEqual(after["dacl"], before["dacl"])
+        self.assertEqual(after["protected"], before["protected"])
+        self.assertEqual(list(self.root.glob(".write-*")), [])
+
+    def test_distinct_protected_target_policy_is_still_applied_and_denies_preserved(self):
+        target = self.root / "custom.txt"
+        target.write_bytes(b"original custom bytes")
+        self.api.set_dacl(target, "O:" + self.owner + "G:BAD:P(D;;0x1;;;" + WindowsAuthorizationOracleTests.OUTSIDER + ")(A;;0x1f01ff;;;" + self.owner + ")")
+        before = security.read_security(target)
+        with patch.object(security, "_apply", wraps=security._apply) as apply:
+            storage.atomic_write(target, b"new custom bytes", security_anchor=self.root)
+        self.assertEqual(apply.call_count, 1)
+        self.assertEqual(target.read_bytes(), b"new custom bytes")
+        self.assertEqual(security.read_security(target)["dacl"], before["dacl"])
+        self.assertTrue(security.read_security(target)["protected"])
+        self.assertFalse(self.api.allowed(self.api.read(target), WindowsAuthorizationOracleTests.OUTSIDER, 1))
+
+
+class PinnedOwnerCollisionPolicyTests(unittest.TestCase):
+    def source(self, **changes):
+        return {"protected": False, "owner": "S-1-5-32-544", "aces": [
+            {"type": 0, "flags": 16, "mask": 0x1F01FF, "sid": "S-1-5-18"},
+            {"type": 0, "flags": 16, "mask": 0x1F01FF, "sid": "S-1-5-32-544"},
+            {"type": 0, "flags": 16, "mask": 0x1F01FF, "sid": "S-1-3-4"}], **changes}
+
+    def test_simple_inherited_allow_reuses_existing_exact_owner_rights_without_touching_original_aces(self):
+        for original_duplicates in (1, 2):
+            source = self.source()
+            source["aces"][1:2] = [dict(source["aces"][1]) for _ in range(original_duplicates)]
+            before = json.dumps(source, sort_keys=True)
+            result = security._pinned_owner_policy(source, "S-1-5-32-544")
+            non_owner = [a for a in source["aces"] if a["sid"] != "S-1-3-4"]
+            self.assertEqual(result[:-1], non_owner, "never merge pre-existing non-OW entries")
+            self.assertEqual(sum(a["sid"] == "S-1-5-32-544" for a in result), original_duplicates)
+            self.assertEqual(result[-1], {"type": 0, "flags": 0, "mask": 0, "sid": "S-1-3-4"})
+            self.assertEqual(json.dumps(source, sort_keys=True), before)
+
+    def test_deny_protected_or_explicit_policy_keeps_exact_conversion_for_strict_verification(self):
+        protected = self.source(protected=True)
+        explicit = self.source()
+        explicit["aces"][0]["flags"] = 0
+        denied = self.source()
+        denied["aces"].insert(1, {"type": 1, "flags": 16, "mask": 1, "sid": WindowsAuthorizationOracleTests.OUTSIDER})
+        for source in (protected, explicit, denied):
+            with self.subTest(source=source):
+                result = security._pinned_owner_policy(source, "S-1-5-32-544")
+                expected = [{**a, "sid": "S-1-5-32-544" if a["sid"] == "S-1-3-4" else a["sid"]} for a in source["aces"]]
+                self.assertEqual(result[:-1], expected, "custom policies must never be simplified to fit OS normalization")
+
+
+@unittest.skipUnless(os.name == "nt", "requires actual Windows Administrators owner-ACE collision")
+class WindowsAdministratorsOwnerCollisionTests(unittest.TestCase):
+    def setUp(self):
+        from ctypes import wintypes as w
+        parent = starter.ROOT / ".test-output"
+        parent.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="beta8-ba-collision-", dir=parent)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.api = WinAuthorization()
+        advapi, kernel = self.api.advapi, self.api.kernel
+        kernel.GetCurrentProcess.restype = w.HANDLE
+        advapi.OpenProcessToken.argtypes = [w.HANDLE, w.DWORD, ctypes.POINTER(w.HANDLE)]
+        advapi.OpenProcessToken.restype = w.BOOL
+        advapi.GetTokenInformation.argtypes = [w.HANDLE, ctypes.c_int, ctypes.c_void_p, w.DWORD, ctypes.POINTER(w.DWORD)]
+        advapi.GetTokenInformation.restype = w.BOOL
+        kernel.CloseHandle.argtypes = [w.HANDLE]
+        token, needed = w.HANDLE(), w.DWORD()
+        self.api.checked(advapi.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)))
+        try:
+            advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
+            buffer = ctypes.create_string_buffer(needed.value)
+            self.api.checked(advapi.GetTokenInformation(token, 1, buffer, len(buffer), ctypes.byref(needed)))
+            sid, text = ctypes.c_void_p.from_buffer(buffer).value, ctypes.c_void_p()
+            self.api.checked(advapi.ConvertSidToStringSidW(sid, ctypes.byref(text)))
+            try:
+                self.user = ctypes.wstring_at(text)
+            finally:
+                kernel.LocalFree(text)
+        finally:
+            kernel.CloseHandle(token)
+        self.target = self.root / "original.txt"
+
+    def policy(self, denied=False):
+        prefix = "(D;OICI;0x1;;;" + WindowsAuthorizationOracleTests.OUTSIDER + ")" if denied else ""
+        self.api.set_dacl(self.root, "O:" + self.api.owner(self.api.read(self.root)) + "G:BAD:P" + prefix +
+            "(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;" + self.user + ")(A;OICI;FA;;;OW)")
+        self.target.write_bytes(b"synthetic exact original")
+
+    @contextlib.contextmanager
+    def administrators_owner_metadata(self):
+        original = security.read_security
+        def read(path):
+            result = original(path)
+            if Path(path) in {self.root, self.target}:
+                return {**result, "owner": "S-1-5-32-544"}
+            return result
+        with patch.object(security, "read_security", read):
+            yield
+
+    def test_real_directory_and_file_retain_existing_ba_allow_and_owner_marker_without_duplicates(self):
+        self.policy()
+        directory = self.root / "new-dir"
+        directory.mkdir()
+        original = security.read_security(directory)
+        with self.administrators_owner_metadata():
+            security.prepare_new_directory(directory, self.root)
+            storage.atomic_write(self.target, b"synthetic replacement", security_anchor=self.root)
+        for path in (directory, self.target):
+            with self.subTest(path=path.name):
+                actual = security.read_security(path)
+                self.assertEqual(sum(a["sid"] == "S-1-5-32-544" for a in actual["aces"]), 1)
+                self.assertEqual(actual["aces"][-1], {"type": 0, "flags": 0, "mask": 0, "sid": "S-1-3-4"})
+                self.assertTrue(self.api.allowed(self.api.read(path), "S-1-5-32-544", 1))
+                self.assertTrue(self.api.allowed(self.api.read(path), self.user, 2))
+                self.assertFalse(self.api.allowed(self.api.read(path), self.user, 0x40000))
+        self.assertEqual(security.read_security(directory)["aces"][:-1], [a for a in original["aces"] if a["sid"] != "S-1-3-4"])
+        self.assertEqual(self.target.read_bytes(), b"synthetic replacement")
+
+    def test_deny_policy_collision_remains_fail_closed_with_original_bytes_and_acl(self):
+        self.policy(denied=True)
+        before, raw = security.read_security(self.target), self.target.read_bytes()
+        with self.administrators_owner_metadata():
+            with self.assertRaises(ValueError):
+                storage.atomic_write(self.target, b"must not replace original", security_anchor=self.root)
+        self.assertEqual(self.target.read_bytes(), raw)
+        self.assertEqual(security.read_security(self.target), before)
+        self.assertEqual(list(self.root.glob(".write-*")), [])

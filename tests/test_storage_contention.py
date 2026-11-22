@@ -22,6 +22,10 @@ class StorageContentionTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="storage-contention-", dir=parent)
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
+        # These tests simulate only Windows lock-file deletion errors. Create
+        # the real state directory before faking storage.os.name, so a Linux
+        # host never enters unrelated real Windows directory-security APIs.
+        storage.ensure_project_directory(self.root / "state", self.root)
 
     def windows_os(self, open_function):
         proxy = SimpleNamespace(**vars(os))

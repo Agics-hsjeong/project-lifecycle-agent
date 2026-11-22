@@ -247,6 +247,30 @@ def _apply(path, aces, protected, advapi, kernel):
         kernel.LocalFree(descriptor)
 
 
+def _pinned_owner_policy(source, owner):
+    """Avoid only newly generated duplicate grants in plain inherited policies.
+
+    Windows coalesces an OW-to-owner grant when that exact ordinary grant already
+    exists (notably an Administrators-owned CI directory). Never merge existing
+    entries or normalize deny, explicit or protected custom policies.
+    """
+    simple = not source["protected"] and all(a["type"] == 0 and a["flags"] & INHERITED_ACE for a in source["aces"])
+    original = {_ace_key(a) for a in source["aces"] if a["sid"] != OWNER_RIGHTS}
+    aces, dynamic = [], False
+    for ace in source["aces"]:
+        if ace["sid"] == OWNER_RIGHTS and ace["mask"] != 0:
+            dynamic = True
+            pinned = {**ace, "sid": owner}
+            if simple and _ace_key(pinned) in original:
+                continue  # Do not manufacture a redundant duplicate of an old ACE.
+            aces.append(pinned)
+        else:
+            aces.append(dict(ace))
+    if dynamic and not any(a["sid"] == OWNER_RIGHTS and a["mask"] == 0 for a in aces):
+        aces.append({"type": 0, "flags": 0, "mask": 0, "sid": OWNER_RIGHTS})
+    return aces
+
+
 def prepare_new_directory(directory, anchor):
     """Internal: pin security only on a just-created, still-empty directory."""
     directory, anchor = Path(directory).absolute(), Path(anchor).resolve()
@@ -264,9 +288,9 @@ def prepare_new_directory(directory, anchor):
             raise ValueError("새 디렉토리가 비어 있지 않아 보안 준비를 중단합니다.")
         source = _read_handle(handle, advapi, kernel)
         dynamic = any(a["sid"] == OWNER_RIGHTS and a["mask"] != 0 for a in source["aces"])
-        aces = [{**a, "sid": owner if a["sid"] == OWNER_RIGHTS and a["mask"] != 0 else a["sid"]} for a in source["aces"]]
-        if dynamic and not any(a["sid"] == OWNER_RIGHTS and a["mask"] == 0 for a in aces):
-            aces.append({"type": 0, "flags": 0, "mask": 0, "sid": OWNER_RIGHTS})
+        if not dynamic:
+            return  # Preserve ordinary inherited/generic/CREATOR_OWNER ACLs verbatim.
+        aces = _pinned_owner_policy(source, owner)
         _apply(directory, aces, source["protected"], advapi, kernel)
         actual = _read_handle(handle, advapi, kernel)
         if actual["aces"] != aces or actual["protected"] != source["protected"]:
@@ -305,11 +329,12 @@ def prepare_temp(temporary, target, anchor, *, repair_owner=False, write_fd=None
         elif existing and mismatch and dynamic:
             raise ValueError("기존 소유자가 프로젝트 보안 기준과 다릅니다. 명시적 복원 검토가 필요합니다.")
         additions = _additional_capabilities(source, inherited, owner, repair=repair_owner) if existing else []
-        aces = [{**ace, "sid": owner if ace["sid"] == OWNER_RIGHTS and ace["mask"] != 0 else ace["sid"]} for ace in source["aces"]]
-        if dynamic and not any(ace["sid"] == OWNER_RIGHTS and ace["mask"] == 0 for ace in aces):
-            aces.append({"type": 0, "flags": 0, "mask": 0, "sid": OWNER_RIGHTS})
+        aces = _pinned_owner_policy(source, owner)
         aces.extend(additions)  # Keep every existing deny/mask/order unchanged.
-        _apply(temporary, aces, source["protected"], advapi, kernel)
+        # Do not reserialize a policy already present on the empty temp. Windows
+        # can normalize ordinary inherited/generic ACEs during a redundant set.
+        if aces != inherited["aces"] or source["protected"] != inherited["protected"]:
+            _apply(temporary, aces, source["protected"], advapi, kernel)
         actual = _read_handle(handle, advapi, kernel)
         if actual["aces"] != aces or actual["protected"] != source["protected"]:
             raise ValueError("임시 파일 보안 정책 검증이 일치하지 않습니다. 원본을 유지합니다.")
