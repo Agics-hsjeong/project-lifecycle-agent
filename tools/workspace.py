@@ -1018,11 +1018,23 @@ def snapshot(folder):
         path = valid_artifact(root, relative)
         identifier = "file:" + relative
         if identifier not in artefacts:
+            exists = False
+            try:
+                exists = path.is_file()
+                metadata = {"exists": exists, "sha256": file_hash(root, relative),
+                    "size_bytes": path.stat().st_size if exists else None,
+                    "preview_kind": "pdf" if path.suffix.lower() == ".pdf" else ("image" if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else ("text" if path.suffix.lower() in {".md", ".txt", ".py", ".ts", ".tsx", ".json", ".csv", ".sql"} else "none")),
+                    "download_allowed": exists and not is_sensitive_path(relative)}
+            except PermissionError:
+                # Display-only metadata may be unavailable while an external
+                # writer holds this file. Keep receipts/gates and file_hash
+                # strict: this is neither a missing file nor verified evidence.
+                metadata = {"exists": exists, "sha256": None, "size_bytes": None,
+                    "preview_kind": "none", "previewable": False, "downloadable": False,
+                    "download_allowed": False, "access_status": "unavailable",
+                    "access_message": "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다."}
             artefacts[identifier] = {"id": identifier, "path": relative, "title": title or Path(relative).name,
-                "exists": path.is_file(), "sha256": file_hash(root, relative), "task_ids": [], "requirement_ids": [],
-                "size_bytes": path.stat().st_size if path.is_file() else None,
-                "preview_kind": "pdf" if path.suffix.lower() == ".pdf" else ("image" if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else ("text" if path.suffix.lower() in {".md", ".txt", ".py", ".ts", ".tsx", ".json", ".csv", ".sql"} else "none")),
-                "download_allowed": path.is_file() and not is_sensitive_path(relative)}
+                **metadata, "task_ids": [], "requirement_ids": []}
         item = artefacts[identifier]
         if task_id and task_id not in item["task_ids"]:
             item["task_ids"].append(task_id)

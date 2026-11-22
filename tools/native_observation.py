@@ -1,12 +1,14 @@
 """Host-sourced runtime projection, separate from deliverable verification and history."""
 import hashlib
 import json
+import os
 import re
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tools.storage import commit, confined, json_bytes, lock
+from tools.storage import atomic_write, confined, consistent_read, json_bytes, lock
 from tools.sensitive_data import redact_text
 
 STORE = "state/workspace-native.json"
@@ -28,6 +30,7 @@ def _root(project):
     return load_project(project)[0]
 
 
+@consistent_read
 def _read(root):
     path = confined(root, STORE)
     if not path.exists():
@@ -51,7 +54,25 @@ def _save(root, data):
     raw = json_bytes(data)
     if len(raw) > MAX_STATE:
         raise ValueError("네이티브 관측 기록 한도에 도달했습니다. 원본 이력은 유지합니다.")
-    commit(root, {STORE: raw})
+    # This replayable projection changes one file while the caller holds lock.
+    # Keep it outside the business rollback journal: a reader-held Windows file
+    # must not leave pending.json blocking snapshots and unrelated transactions.
+    path = confined(root, STORE)
+    deadline = time.monotonic() + 0.25
+    while True:
+        try:
+            atomic_write(path, raw)
+            return
+        except PermissionError as exc:
+            # Only retry replacement of this exact native file. Denials during
+            # temp creation/flush, other paths and non-Windows errors stay fatal.
+            destination = getattr(exc, "filename2", None)
+            remaining = deadline - time.monotonic()
+            if (os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}
+                    or destination is None or Path(destination).absolute() != path.absolute()
+                    or remaining <= 0):
+                raise
+            time.sleep(min(0.01, remaining))
 
 
 def read(project):

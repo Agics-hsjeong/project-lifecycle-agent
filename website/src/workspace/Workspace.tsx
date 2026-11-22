@@ -626,6 +626,9 @@ function WorkspaceContent({
         (a) => a.provider === provider && freshAgent(a, now),
       ));
 
+  const inaccessibleFiles =
+    snapshot?.artefacts.filter((a) => a.access_status === "unavailable")
+      .length || 0;
   const nativeMonitor = snapshot?.host?.native_monitor;
   const nativeMonitorUnavailable =
     mode === "local" && nativeMonitor?.status === "unavailable";
@@ -1012,13 +1015,34 @@ function WorkspaceContent({
           )}
         </div>
       </header>
-      {(error || supervisorNotice || nativeMonitorUnavailable) && (
+      {(error ||
+        supervisorNotice ||
+        nativeMonitorUnavailable ||
+        inaccessibleFiles > 0) && (
         <div
           className="workspace-notices"
           role="region"
           aria-label="실행·연결 알림"
           tabIndex={0}
         >
+          {inaccessibleFiles > 0 && (
+            <div
+              className="native-monitor-notice artefact-access-notice"
+              role="status"
+              aria-live="polite"
+            >
+              <Icon name="info" size={17} />
+              <div>
+                <strong>
+                  파일 접근 지연 · {inaccessibleFiles}개 버전 확인 불가
+                </strong>
+                <p>
+                  해당 파일의 받기와 미리보기를 잠시 중단합니다. 다른 작업과
+                  로그는 계속 갱신합니다.
+                </p>
+              </div>
+            </div>
+          )}
           {nativeMonitorUnavailable && (
             <div
               className="native-monitor-notice"
@@ -1271,11 +1295,13 @@ function WorkspaceContent({
                         <small className="mono">{a.path}</small>
                         <small className="artifact-kind">
                           {artefactKind(a.path)} ·{" "}
-                          {a.exists === false
-                            ? "파일 없음"
-                            : a.sha256
-                              ? "현재 버전 등록"
-                              : "버전 미확인"}
+                          {a.access_status === "unavailable"
+                            ? "접근 불가 · 버전 미확인"
+                            : a.exists === false
+                              ? "파일 없음"
+                              : a.sha256
+                                ? "현재 버전 등록"
+                                : "버전 미확인"}
                         </small>
                       </span>
                       <span className="artifact-hash mono">

@@ -1,8 +1,13 @@
 """Windows concurrency edge cases without relaxing path or permission guards."""
+import base64
+import contextlib
 import errno
+import json
 import os
 from pathlib import Path, PureWindowsPath
 import tempfile
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -156,3 +161,226 @@ class StorageContentionTests(unittest.TestCase):
             return lstat(path, *args, **kwargs)
         with patch.object(Path, 'lstat', removed):
             self.assertEqual(storage.confined(self.root, 'inside.txt'), target)
+
+
+class PendingJournalContentionTests(unittest.TestCase):
+    """Real reader handles must not strand a completed business journal."""
+
+    def setUp(self):
+        parent = starter.ROOT / ".test-output"
+        parent.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="beta7-pending-contention-", dir=parent)
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        (self.root / "state").mkdir()
+        self.pending = self.root / "state/pending.json"
+        self.relative = "state/synthetic-business.json"
+        self.target = self.root / self.relative
+        self.before, self.after = b'{"before": true}\n', b'{"after": true}\n'
+        self.target.write_bytes(self.before)
+
+    def seed_pending(self):
+        self.target.write_bytes(self.after)
+        storage.atomic_write(self.pending, storage.json_bytes({"schema_version": 1, "entries": [{
+            "path": self.relative, "before": base64.b64encode(self.before).decode(),
+            "after": storage.digest(self.after)}]}))
+
+    @contextlib.contextmanager
+    def held_pending(self, *, short, existing=False, write_failure=None):
+        """Open a real builtin reader and release after an actual unlink denial."""
+        denied = threading.Event()
+        handles, threads, errors, codes = [], [], [], []
+        original_write, original_unlink = storage.atomic_write, Path.unlink
+        def open_reader():
+            if handles:
+                return
+            handle = self.pending.open("rb")
+            handles.append(handle)
+            if short:
+                def release():
+                    try:
+                        if not denied.wait(5):
+                            raise RuntimeError("no real journal unlink denial observed")
+                        time.sleep(0.025)
+                    except BaseException as exc:
+                        errors.append(exc)
+                    finally:
+                        handle.close()
+                thread = threading.Thread(target=release)
+                threads.append(thread)
+                thread.start()
+        def writing(path, raw):
+            if write_failure is not None and Path(path) == self.target and raw == self.after:
+                raise write_failure
+            result = original_write(path, raw)
+            if Path(path) == self.pending:
+                open_reader()
+            return result
+        def unlinking(path, *args, **kwargs):
+            try:
+                return original_unlink(path, *args, **kwargs)
+            except PermissionError as exc:
+                if path == self.pending:
+                    codes.append(exc.winerror)
+                    denied.set()
+                raise
+        try:
+            with patch.object(storage, "atomic_write", writing), patch.object(Path, "unlink", unlinking):
+                if existing:
+                    open_reader()
+                yield codes
+        finally:
+            denied.set()
+            for thread in threads:
+                thread.join(5)
+            for handle in handles:
+                handle.close()
+        self.assertTrue(handles, "a real journal reader must be opened")
+        self.assertTrue(codes, "a real sharing violation must occur before retry")
+        self.assertTrue(all(code in {5, 32} for code in codes))
+        self.assertEqual(errors, [])
+        self.assertTrue(all(not thread.is_alive() for thread in threads))
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_short_pending_reader_allows_commit_to_finish_without_a_journal(self):
+        with self.held_pending(short=True):
+            with storage.lock(self.root):
+                storage.commit(self.root, {self.relative: self.after})
+        self.assertEqual(self.target.read_bytes(), self.after)
+        self.assertFalse(self.pending.exists())
+        self.assertFalse((self.root / "state/write.lock").exists())
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_long_pending_reader_preserves_journal_then_recover_restores_preimage(self):
+        with self.held_pending(short=False):
+            started = time.monotonic()
+            with self.assertRaises(PermissionError):
+                with storage.lock(self.root):
+                    storage.commit(self.root, {self.relative: self.after})
+            elapsed = time.monotonic() - started
+            self.assertGreaterEqual(elapsed, 0.22)
+            self.assertLess(elapsed, 1.25)
+            self.assertEqual(self.target.read_bytes(), self.after)
+            entry = json.loads(self.pending.read_bytes())["entries"][0]
+            self.assertEqual(base64.b64decode(entry["before"]), self.before)
+            self.assertEqual(entry["after"], storage.digest(self.after))
+            self.assertFalse((self.root / "state/write.lock").exists())
+        self.assertTrue(storage.recover(self.root)["recovered"])
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertFalse(self.pending.exists())
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_short_pending_reader_allows_rollback_cleanup_and_original_error(self):
+        failure = OSError(errno.EIO, "Synthetic business write failure")
+        with self.held_pending(short=True, write_failure=failure):
+            with self.assertRaises(OSError) as caught:
+                with storage.lock(self.root):
+                    storage.commit(self.root, {self.relative: self.after})
+        self.assertIs(caught.exception, failure)
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertFalse(self.pending.exists())
+        self.assertFalse((self.root / "state/write.lock").exists())
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_long_pending_reader_keeps_rollback_journal_recoverable(self):
+        failure = OSError(errno.EIO, "Synthetic business write failure")
+        with self.held_pending(short=False, write_failure=failure):
+            started = time.monotonic()
+            with self.assertRaises(PermissionError):
+                with storage.lock(self.root):
+                    storage.commit(self.root, {self.relative: self.after})
+            self.assertGreaterEqual(time.monotonic() - started, 0.22)
+            self.assertLess(time.monotonic() - started, 1.25)
+            self.assertEqual(self.target.read_bytes(), self.before)
+            self.assertTrue(self.pending.exists())
+            self.assertFalse((self.root / "state/write.lock").exists())
+        self.assertTrue(storage.recover(self.root)["recovered"])
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertFalse(self.pending.exists())
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_short_pending_reader_allows_recovery_cleanup_to_finish(self):
+        self.seed_pending()
+        with self.held_pending(short=True, existing=True):
+            result = storage.recover(self.root)
+        self.assertTrue(result["recovered"])
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertFalse(self.pending.exists())
+        self.assertFalse((self.root / "state/write.lock").exists())
+
+    @unittest.skipUnless(os.name == "nt", "requires real Windows delete-sharing semantics")
+    def test_long_pending_reader_keeps_failed_recovery_replayable(self):
+        self.seed_pending()
+        original_journal = self.pending.read_bytes()
+        with self.held_pending(short=False, existing=True):
+            started = time.monotonic()
+            with self.assertRaises(PermissionError):
+                storage.recover(self.root)
+            self.assertGreaterEqual(time.monotonic() - started, 0.22)
+            self.assertLess(time.monotonic() - started, 1.25)
+            self.assertEqual(self.target.read_bytes(), self.before)
+            self.assertEqual(self.pending.read_bytes(), original_journal)
+            self.assertFalse((self.root / "state/write.lock").exists())
+        self.assertTrue(storage.recover(self.root)["recovered"])
+        self.assertEqual(self.target.read_bytes(), self.before)
+        self.assertFalse(self.pending.exists())
+
+    def test_pending_retry_is_limited_to_exact_windows_sharing_errors(self):
+        self.seed_pending()
+        original = self.pending.read_bytes()
+        original_unlink = Path.unlink
+        for host, code, filename, kind in (
+                ("nt", 5, None, PermissionError),
+                ("nt", 32, self.root / "unrelated.json", PermissionError),
+                ("nt", 13, self.pending, PermissionError),
+                ("posix", 5, self.pending, PermissionError),
+                ("nt", 5, self.pending, OSError),
+                ("nt", None, self.pending, FileNotFoundError)):
+            with self.subTest(host=host, code=code, filename=filename, kind=kind):
+                failure = kind(errno.EIO, "Synthetic unrelated cleanup failure", str(filename) if filename else None)
+                if code is not None:
+                    failure.winerror = code
+                calls = []
+                def unlinking(path, *args, **kwargs):
+                    if path == self.pending:
+                        calls.append(path)
+                        raise failure
+                    return original_unlink(path, *args, **kwargs)
+                proxy = SimpleNamespace(**vars(os))
+                proxy.name = host
+                with storage.lock(self.root, recovering=True):
+                    with patch.object(storage, "os", proxy), patch.object(Path, "unlink", unlinking):
+                        with self.assertRaises(kind) as caught:
+                            storage._clear_pending(self.root)
+                self.assertIs(caught.exception, failure)
+                self.assertEqual(calls, [self.pending])
+                self.assertEqual(self.pending.read_bytes(), original)
+        self.assertEqual(self.target.read_bytes(), self.after)
+
+    def test_persistent_pending_denial_obeys_250ms_budget_and_preserves_bytes(self):
+        self.seed_pending()
+        original = self.pending.read_bytes()
+        original_unlink = Path.unlink
+        for code in (5, 32):
+            with self.subTest(winerror=code):
+                failure = PermissionError(errno.EACCES, "Synthetic persistent cleanup denial", str(self.pending))
+                failure.winerror = code
+                calls, sleeps = [], []
+                clock = iter([0.0, 0.1, 0.25])
+                def unlinking(path, *args, **kwargs):
+                    if path == self.pending:
+                        calls.append(path)
+                        raise failure
+                    return original_unlink(path, *args, **kwargs)
+                proxy = SimpleNamespace(**vars(os))
+                proxy.name = "nt"
+                with storage.lock(self.root, recovering=True):
+                    with patch.object(storage, "os", proxy), patch.object(Path, "unlink", unlinking), patch.object(
+                            storage, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=sleeps.append)):
+                        with self.assertRaises(PermissionError) as caught:
+                            storage._clear_pending(self.root)
+                self.assertIs(caught.exception, failure)
+                self.assertEqual(calls, [self.pending, self.pending])
+                self.assertEqual(sleeps, [0.01])
+                self.assertEqual(self.pending.read_bytes(), original)
+        self.assertFalse((self.root / "state/write.lock").exists())

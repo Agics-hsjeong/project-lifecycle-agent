@@ -141,6 +141,27 @@ def lock(root, *, recovering=False):
         path.unlink(missing_ok=True)
 
 
+def _clear_pending(root):
+    """Caller holds lock; retain the journal if bounded Windows cleanup fails."""
+    pending = confined(root, "state/pending.json")
+    deadline = time.monotonic() + 0.25
+    while True:
+        try:
+            pending.unlink()
+            return
+        except PermissionError as exc:
+            # A scanner can hold this completed journal briefly without sharing
+            # delete. Retry only its exact name, never remove any other file or
+            # hide a persistent denial that still requires normal recovery.
+            filename = exc.filename
+            remaining = deadline - time.monotonic()
+            if (os.name != "nt" or getattr(exc, "winerror", None) not in {5, 32}
+                    or filename is None or Path(filename).absolute() != pending.absolute()
+                    or remaining <= 0):
+                raise
+            time.sleep(min(0.01, remaining))
+
+
 def commit(root, changes):
     """Caller holds lock. Keep durable preimages until every replacement succeeds."""
     pending = confined(root, "state/pending.json")
@@ -162,9 +183,9 @@ def commit(root, changes):
                 atomic_write(path, content)
     except BaseException:
         _restore(root, entries)
-        pending.unlink()
+        _clear_pending(root)
         raise
-    pending.unlink()
+    _clear_pending(root)
 
 
 def _restore(root, entries):
@@ -243,5 +264,5 @@ def recover(root, *, abandoned=False):
             if current not in {digest(before) if before is not None else None, entry["after"]}:
                 raise ValueError(f"복구 중단: {entry['path']}가 기록 이후 변경되었습니다.")
         _restore(root, journal["entries"])
-        pending.unlink()
+        _clear_pending(root)
         return {"recovered": True, "files": [entry["path"] for entry in journal["entries"]]}

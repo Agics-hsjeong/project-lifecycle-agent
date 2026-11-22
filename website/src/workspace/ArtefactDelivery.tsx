@@ -166,7 +166,9 @@ export function ArtefactDelivery({
         <p className="fine-print">
           {mode !== "local"
             ? "데모·저장 스냅샷은 실제 파일 서버와 연결되지 않습니다."
-            : "등록된 현재 파일과 해시가 있어야 받을 수 있습니다."}
+            : file?.access_status === "unavailable"
+              ? "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다. 다음 갱신에서 다시 확인합니다."
+              : "등록된 현재 파일과 해시가 있어야 받을 수 있습니다."}
         </p>
       )}
       <p className="fine-print">

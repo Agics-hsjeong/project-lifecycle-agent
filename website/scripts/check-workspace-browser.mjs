@@ -1454,6 +1454,96 @@ try {
     );
     await p.close();
   }
+  // Denied artefacts remain explicit while the board continues to update.
+  for (const width of [1440, 390]) {
+    const raw = snapshot();
+    Object.assign(raw.artefacts[0], {
+      exists: true,
+      sha256: null,
+      access_status: "unavailable",
+      access_message: "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다.",
+      downloadable: false,
+      previewable: false,
+    });
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
+    await p.locator(".artefact-access-notice").waitFor();
+    check(
+      (await p.locator(".artefact-access-notice").innerText()).includes(
+        "1개 버전 확인 불가",
+      ),
+      `${width}: artefact denial is explicit`,
+    );
+    check(
+      (await p.locator('.b-task-row[data-task-id="TASK-R"]').count()) === 1,
+      `${width}: artefact denial keeps the current board live`,
+    );
+    if (width < 768)
+      await p
+        .getByRole("button", { name: "프로젝트 메뉴 열기", exact: true })
+        .click();
+    await artifact(p);
+    check(
+      await p
+        .getByRole("button", { name: "다운로드", exact: true })
+        .isDisabled(),
+      `${width}: unreadable file cannot download`,
+    );
+    check(
+      await p
+        .getByRole("button", { name: "미리보기", exact: true })
+        .isDisabled(),
+      `${width}: unreadable file cannot preview`,
+    );
+    await p
+      .locator(".artefact-delivery")
+      .getByText(/다음 갱신/)
+      .waitFor();
+    check(
+      (await p.locator(".artefact-delivery").innerText()).includes("다음 갱신"),
+      `${width}: denial has an honest recovery message`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+      `${width}: access notice fits the viewport`,
+    );
+    await p
+      .getByRole("button", { name: "작업 상세 닫기", exact: true })
+      .click();
+    raw.artefacts[0] = {
+      ...raw.artefacts[0],
+      sha256: "recovered-hash",
+      access_status: "available",
+      downloadable: true,
+      previewable: true,
+    };
+    await refresh(p);
+    await p.locator(".artefact-access-notice").waitFor({ state: "detached" });
+    if (width < 768)
+      await p
+        .getByRole("button", { name: "프로젝트 메뉴 열기", exact: true })
+        .click();
+    await artifact(p);
+    await p.waitForFunction(() =>
+      [...document.querySelectorAll(".delivery-actions button")].some(
+        (button) =>
+          button.textContent.trim() === "다운로드" && !button.disabled,
+      ),
+    );
+    check(
+      await p
+        .getByRole("button", { name: "다운로드", exact: true })
+        .isEnabled(),
+      `${width}: readable current version becomes available again`,
+    );
+    await p.close();
+  }
   check(
     report.errors.length === 0,
     "all regressions have zero browser exceptions",

@@ -572,3 +572,25 @@ for (const [name, monitor] of [
     raw.host = { connected: true, native_monitor: monitor };
     assert.throws(() => normalise(raw), /스냅샷/);
   });
+
+test("unreadable artefact preserves denial without claiming a hash", () => {
+  const raw = fixture();
+  Object.assign(raw.artefacts[0], {
+    sha256: null,
+    access_status: "unavailable",
+    access_message: "현재 버전 확인 불가",
+    downloadable: false,
+    previewable: false,
+  });
+  const s = normalise(raw);
+  assert.equal(s.artefacts[0].sha256, null);
+  assert.equal(s.artefacts[0].access_status, "unavailable");
+  assert.equal(s.artefacts[0].downloadable, false);
+  assert.equal(s.tasks[0].status, "running");
+});
+for (const key of ["access_status", "access_message"])
+  test(`reject malformed artefact access: ${key}`, () => {
+    const raw = fixture();
+    raw.artefacts[0][key] = { unsafe: true };
+    assert.throws(() => normalise(raw), /스냅샷/);
+  });

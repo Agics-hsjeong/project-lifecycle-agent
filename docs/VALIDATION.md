@@ -1,6 +1,6 @@
 # 검증 기록
 
-기능·환경별 실제 검증과 대상 버전을 구분해 기록합니다. 공개 beta.2의 호스트 검증은 [HOST-VALIDATION](HOST-VALIDATION.md), 관제·자동 실행 및 beta.6 관측 회귀 검증은 [WORKSPACE-OBSERVATION-VALIDATION](WORKSPACE-OBSERVATION-VALIDATION.md)에 기록합니다. 아래 과거 버전 검증 기록은 당시 범위를 유지합니다.
+기능·환경별 실제 검증과 대상 버전을 구분해 기록합니다. 공개 beta.2의 호스트 검증은 [HOST-VALIDATION](HOST-VALIDATION.md), 관제·자동 실행 및 beta.6·beta.7 관측·파일 경합 검증은 [WORKSPACE-OBSERVATION-VALIDATION](WORKSPACE-OBSERVATION-VALIDATION.md)에 기록합니다. 아래 과거 버전 검증 기록은 당시 범위를 유지합니다.
 
 ## 2026-11-03 폴더 이동 분석·v2.0.0-beta.1
 
