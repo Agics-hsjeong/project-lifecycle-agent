@@ -209,10 +209,10 @@ class PendingJournalContentionTests(unittest.TestCase):
                 thread = threading.Thread(target=release)
                 threads.append(thread)
                 thread.start()
-        def writing(path, raw):
+        def writing(path, raw, **kwargs):
             if write_failure is not None and Path(path) == self.target and raw == self.after:
                 raise write_failure
-            result = original_write(path, raw)
+            result = original_write(path, raw, **kwargs)
             if Path(path) == self.pending:
                 open_reader()
             return result

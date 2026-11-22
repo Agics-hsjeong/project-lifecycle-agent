@@ -205,9 +205,9 @@ class NativeConcurrencyTests(unittest.TestCase):
                 errors.append(exc)
             finally:
                 released.set()
-        def write(path, raw):
+        def write(path, raw, **kwargs):
             try:
-                return original_write(path, raw)
+                return original_write(path, raw, **kwargs)
             except PermissionError as exc:
                 codes.append(exc.winerror)
                 denied.set()
@@ -274,14 +274,14 @@ class NativeConcurrencyTests(unittest.TestCase):
     def test_transient_exact_native_replace_denial_retries_then_succeeds(self):
         original_write = native.atomic_write
         attempts = []
-        def replace(path, raw):
+        def replace(path, raw, **kwargs):
             attempts.append(path)
             if len(attempts) < 3:
                 error = PermissionError(errno.EACCES, "synthetic replacement sharing denial")
                 error.winerror = 32
                 error.filename2 = str(self.path)
                 raise error
-            return original_write(path, raw)
+            return original_write(path, raw, **kwargs)
         with patch.object(native, "atomic_write", replace):
             native.ingest(self.root, "codex", _event("transient"))
         self.assertEqual(attempts, [self.path] * 3)

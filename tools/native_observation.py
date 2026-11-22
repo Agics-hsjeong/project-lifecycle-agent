@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tools.storage import atomic_write, confined, consistent_read, json_bytes, lock
+from tools.storage import atomic_write, confined, consistent_read, ensure_project_directory, json_bytes, lock
 from tools.sensitive_data import redact_text
 
 STORE = "state/workspace-native.json"
@@ -61,7 +61,7 @@ def _save(root, data):
     deadline = time.monotonic() + 0.25
     while True:
         try:
-            atomic_write(path, raw)
+            atomic_write(path, raw, security_anchor=root)
             return
         except PermissionError as exc:
             # Only retry replacement of this exact native file. Denials during
@@ -136,6 +136,12 @@ def prepare_delegation(project, task_id, role, provider, session_id):
     with lock(root):
         if task_id not in _task_ids(root):
             raise ValueError("실제 작업 ID가 필요합니다.")
+        from tools import workspace
+        execution = workspace.read(root)["tasks"].get(task_id, {}).get("execution")
+        if execution is not None:
+            execution = workspace.validate_execution(root, execution)
+            for relative in execution["expected_outputs"]:
+                ensure_project_directory(workspace.execution_path(root, relative).parent, root)
         data = _read(root)
         if len(data["bindings"]) >= MAX_BINDINGS:
             raise ValueError("이 프로젝트의 위임 연결 한도에 도달했습니다.")

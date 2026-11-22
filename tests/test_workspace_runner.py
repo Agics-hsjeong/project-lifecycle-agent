@@ -270,9 +270,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_two_jobs_complete_under_independent_twenty_ms_snapshot_reader(self):
-        stop, worker, result, errors = self.launch_waiting()
-        self.wait_for(lambda: workspace.snapshot(self.root).get("runners"))
-        reader_stop = threading.Event()
+        # Human approval is fixture setup; test executor progress under the read
+        # load, rather than approval setup reacquiring a lock between snapshots.
+        self.decide()
+        reader_stop, reader_ready = threading.Event(), threading.Event()
         stats = {"reads": 0, "contentions": 0}
         observer_errors = []
         def observe():
@@ -280,6 +281,7 @@ class RunnerTests(unittest.TestCase):
                 try:
                     workspace.snapshot(self.root)
                     stats["reads"] += 1
+                    reader_ready.set()
                 except ValueError as error:
                     if runner._contention(error):
                         stats["contentions"] += 1
@@ -290,26 +292,29 @@ class RunnerTests(unittest.TestCase):
         reader = threading.Thread(target=observe)
         reader.start()
         try:
-            self.decide()
-            self.wait_for(lambda: len(self.calls) == 2)
-            self.wait_for(lambda: all(q["status"] == "completed" for q in workspace.snapshot(self.root)["commands"]))
-            final = runner._snapshot(self.root)
-            self.assertEqual([q["status"] for q in final["commands"]], ["completed", "completed"])
-            self.assertTrue(all(q.get("notes") == "Synthetic fixture output written" for q in final["commands"]))
-            self.assertGreater(stats["reads"], 0)
-            self.assertEqual(observer_errors, [])
-            stop.set()
-            worker.join(5)
-            self.assertFalse(worker.is_alive())
-            self.assertEqual(errors, [])
-            self.assertEqual(result["completed"], 2)
-            self.assertEqual(result["failed"], 0)
-            self.assertEqual(self.calls, [("TASK-002", "backend"), ("TASK-003", "qa")])
+            self.assertTrue(reader_ready.wait(5), "Independent snapshot reader did not start")
+            stop, worker, result, errors = self.launch_waiting()
+            try:
+                self.wait_for(lambda: len(self.calls) == 2)
+                self.wait_for(lambda: all(q["status"] == "completed" for q in workspace.snapshot(self.root)["commands"]))
+                final = runner._snapshot(self.root)
+                self.assertEqual([q["status"] for q in final["commands"]], ["completed", "completed"])
+                self.assertTrue(all(q.get("notes") == "Synthetic fixture output written" for q in final["commands"]))
+                self.assertGreater(stats["reads"], 0)
+                self.assertEqual(observer_errors, [])
+                stop.set()
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(errors, [])
+                self.assertEqual(result["completed"], 2)
+                self.assertEqual(result["failed"], 0)
+                self.assertEqual(self.calls, [("TASK-002", "backend"), ("TASK-003", "qa")])
+            finally:
+                stop.set()
+                worker.join(5)
         finally:
             reader_stop.set()
             reader.join(5)
-            stop.set()
-            worker.join(5)
 
     def test_retry_jitter_escapes_periodic_reader_phase_without_extending_deadline(self):
         clock = {"ns": 0}

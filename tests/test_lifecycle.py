@@ -212,10 +212,10 @@ class LifecycleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "잠금"):
                 apply_current(self.project, {"handoff": "동시 변경"})
             original = storage.atomic_write
-            def fail_once(path, value):
+            def fail_once(path, value, **kwargs):
                 if Path(path).name == "fail.txt":
                     raise OSError("simulated disk failure")
-                return original(path, value)
+                return original(path, value, **kwargs)
             with patch.object(storage, "atomic_write", side_effect=fail_once), self.assertRaises(OSError):
                 storage.commit(self.project, {"docs/a.txt": b"after", "docs/fail.txt": b"new"})
         self.assertEqual((self.project / "docs/a.txt").read_text(encoding="utf-8"), "before")

@@ -1,6 +1,6 @@
 {
   "name": "project-lifecycle-agent",
-  "version": "2.0.0-beta.7",
+  "version": "2.0.0-beta.8",
   "description": "Codex·Claude Code에서 제안·기획·설계·개발·검증·인수인계를 돕는 프로젝트 스타트팩 에이전트입니다.",
   "skills": "./skills/",
   "requires_local_executor": true,

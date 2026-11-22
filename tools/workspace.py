@@ -870,12 +870,21 @@ def assert_step_allowed(root, run_id, step_id):
         raise Conflict("; ".join(issues))
 
 
-def valid_artifact(root, relative):
-    path = confined(root, relative)
-    parts = path.relative_to(root).parts
+def _artifact_reference(relative):
+    """Validate declared paths without touching inaccessible filesystem objects."""
+    if not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative:
+        raise ValueError("프로젝트 내부의 '/' 상대 경로가 필요합니다.")
+    reference = Path(relative)
+    parts = reference.parts
+    if relative.startswith("/") or reference.is_absolute() or ".." in parts:
+        raise ValueError("프로젝트 외부 경로는 허용하지 않습니다.")
     if is_sensitive_path(relative) or not parts or parts[0] == "state" or set(parts).intersection({".git", ".codex", ".claude", ".aws", ".ssh", ".gnupg", ".azure", ".netrc", ".npmrc", ".pypirc"}) or any(p.startswith(".env") for p in parts):
         raise ValueError("제어 기록·인증 자료는 관제 산출물로 열 수 없습니다.")
-    return path
+
+
+def valid_artifact(root, relative):
+    _artifact_reference(relative)
+    return confined(root, relative)
 
 
 
@@ -1015,11 +1024,12 @@ def snapshot(folder):
     artefacts, edges = {}, []
 
     def artifact(relative, task_id=None, requirement_id=None, title=None):
-        path = valid_artifact(root, relative)
+        _artifact_reference(relative)
         identifier = "file:" + relative
         if identifier not in artefacts:
             exists = False
             try:
+                path = valid_artifact(root, relative)
                 exists = path.is_file()
                 metadata = {"exists": exists, "sha256": file_hash(root, relative),
                     "size_bytes": path.stat().st_size if exists else None,
@@ -1031,7 +1041,7 @@ def snapshot(folder):
                 # strict: this is neither a missing file nor verified evidence.
                 metadata = {"exists": exists, "sha256": None, "size_bytes": None,
                     "preview_kind": "none", "previewable": False, "downloadable": False,
-                    "download_allowed": False, "access_status": "unavailable",
+                    "download_allowed": False, "path_validated": False, "access_status": "unavailable",
                     "access_message": "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다."}
             artefacts[identifier] = {"id": identifier, "path": relative, "title": title or Path(relative).name,
                 **metadata, "task_ids": [], "requirement_ids": []}
@@ -1085,8 +1095,12 @@ def snapshot(folder):
             edge(task["id"], aid, "produces" if relative in task.get("evidence_refs", []) else "references",
                  "state/runs.json" if task.get("run_id") else "registers/tasks.csv")
         for relative in task.get("inputs", []):
-            if confined(root, relative).is_dir():
-                continue
+            _artifact_reference(relative)
+            try:
+                if confined(root, relative).is_dir():
+                    continue
+            except PermissionError:
+                pass  # The display-only artifact node declares access unknown.
             edge(artifact(relative), task["id"], "references", "state/runs.json")
     gates = []
     for gate in store["gates"]:

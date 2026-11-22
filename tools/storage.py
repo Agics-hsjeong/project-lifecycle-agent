@@ -88,15 +88,68 @@ def confined(root, relative):
     return path
 
 
-def atomic_write(path, content):
+def ensure_project_directory(path, root):
+    """Prepare only directories this call creates; never change existing ACLs."""
+    root, path = Path(root).resolve(), Path(path).absolute()
+    if not path.is_relative_to(root):
+        raise ValueError("프로젝트 밖 디렉토리는 준비하지 않습니다.")
+    missing, current = [], path
+    while current != root:
+        current = confined(root, current.relative_to(root).as_posix())
+        if current.exists():
+            if not current.is_dir():
+                raise ValueError("필요한 디렉토리 경로가 파일입니다.")
+            break
+        missing.append(current)
+        current = current.parent
+    for directory in reversed(missing):
+        try:
+            directory.mkdir()
+        except FileExistsError:
+            checked = confined(root, directory.relative_to(root).as_posix())
+            if not checked.is_dir():
+                raise ValueError("동시에 생성된 경로가 디렉토리가 아닙니다.")
+            continue  # Another creator owns this existing policy.
+        try:
+            if os.name == "nt":
+                from tools.windows_security import prepare_new_directory
+                prepare_new_directory(directory, root)
+        except BaseException:
+            try:
+                directory.rmdir()  # Empty only; never recursively remove content.
+            except OSError:
+                pass
+            raise
+
+
+def atomic_write(path, content, *, security_anchor=None, repair_owner=False):
+    if repair_owner and security_anchor is None:
+        raise ValueError("명시적 보안 복원에는 프로젝트 보안 기준이 필요합니다.")
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if security_anchor is not None:
+        ensure_project_directory(path.parent, security_anchor)
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".write-", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
+            if security_anchor is not None and os.name == "nt":
+                from tools.windows_security import prepare_temp
+                secured_fd = prepare_temp(temporary, path, security_anchor, repair_owner=repair_owner, write_fd=fd)
+                # ReOpenFile evaluates the final DACL on the same file object.
+                # The original creation fd keeps its identity stable, but never
+                # bypasses a newly applied deny when payload bytes are written.
+                with os.fdopen(secured_fd, "wb") as secured:
+                    secured.truncate(0)
+                    secured.write(content)
+                    secured.flush()
+                    os.fsync(secured.fileno())
+            else:
+                if repair_owner:
+                    raise OSError("네이티브 보안 복원은 Windows에서만 사용할 수 있습니다.")
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
         os.replace(temporary, path)
     finally:
         temporary = Path(temporary)
@@ -107,7 +160,7 @@ def atomic_write(path, content):
 @contextmanager
 def lock(root, *, recovering=False):
     state = confined(root, "state")
-    state.mkdir(exist_ok=True)
+    ensure_project_directory(state, root)
     path = confined(root, "state/write.lock")
     try:
         # Windows may report EACCES while a prior lock deletion is pending.
@@ -173,14 +226,14 @@ def commit(root, changes):
         before = path.read_bytes() if path.exists() else None
         entries.append({"path": relative, "before": base64.b64encode(before).decode() if before is not None else None,
                         "after": digest(content) if content is not None else None})
-    atomic_write(pending, json_bytes({"schema_version": 1, "entries": entries}))
+    atomic_write(pending, json_bytes({"schema_version": 1, "entries": entries}), security_anchor=root)
     try:
         for relative, content in changes.items():
             path = confined(root, relative)
             if content is None:
                 path.unlink(missing_ok=True)
             else:
-                atomic_write(path, content)
+                atomic_write(path, content, security_anchor=root)
     except BaseException:
         _restore(root, entries)
         _clear_pending(root)
@@ -195,7 +248,7 @@ def _restore(root, entries):
         if before is None:
             path.unlink(missing_ok=True)
         else:
-            atomic_write(path, before)
+            atomic_write(path, before, security_anchor=root)
 
 
 def process_alive(pid):

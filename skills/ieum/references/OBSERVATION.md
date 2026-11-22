@@ -27,3 +27,19 @@ AI 검토·수정·재검증은 해당 역할끼리 이어간다. 사업 판단�
 작업자 ID와 현재 상태는 `workspace-snapshot`의 `agents[].native_agent_id`, `session_id`, `task_id`와 TASK의 실행 상태로 확인한다. `state/workspace-native.json`을 직접 반복 읽는 진단으로 실행 중인 관측 저장과 경쟁하지 않는다. 관리 조회 API는 내부 읽기·쓰기를 직렬화한다.
 
 관측 데이터는 업무 원장과 별도의 단일 파일 원자 저장을 사용한다. 다른 프로그램이 계속 파일을 열고 있으면 관측 반영이 지연될 수 있으며 보관함·현재 세션 커서로 재전달한다. 이를 해결하려고 pending.json을 임의 삭제하거나 접근 권한·훅 신뢰 검사를 우회하지 않는다. 기존 업무 트랜잭션의 미완료 기록은 실제 원인을 확인한 뒤 기존 표준 복구 규약을 따른다.
+
+
+### Windows 소유자 경계
+
+생성형 native 파일은 프로젝트 보안 기준을 전달하는 저장 경로를 사용한다. 격리 계정의 새 파일로 교체해도 기존 프로젝트 소유자의 접근과 기존 deny 정책을 보존해야 한다. 직접 os.replace·권한 광역 부여·소유권 강탈·미완료 기록 삭제로 해결하지 않는다.
+
+알려진 상속 OWNER RIGHTS 문제는 정상 접근 권한이 있는 원래 실행 주체에서 `python tools/native_bridge.py repair-access PROJECT` 엔진으로만 조건부 복원한다. 엔진은 정확한 native 파일·schema·상속 정책·보호 설정·원본 바이트를 검증한다. 사용자 정의 소유자/권한·미지원 정책이면 복원을 강행하지 않는다. 현재 주체에 원본 읽기 권한이 없으면 우회하지 말고 실행 환경과 실제 접근 주체를 진단한다. 복원은 실제 업무 승인이나 검증 완료 기록을 만들지 않는다.
+
+
+### Windows 엔진 관리정보와 출력 폴더
+
+native 외 관리정보 접근 문제는 `python tools/native_bridge.py repair-project-access PROJECT --path project.json --path registers/tasks.csv`처럼 실제 필요한 경로만 반복 명시해 엔진으로 복원한다. 정확한 project·5개 register·workspace/runtime/activity/native/runs·events와 실제 events 등록 history만 허용한다. 전 대상의 스키마·원본 바이트를 먼저 검증하고 보안 조건 및 교체 전후 바이트·해시 보존을 확인한다. 입력·코드·일반 문서·pending 저널은 제외하며 표준 미완료 저널 거부를 우회하지 않는다. 원본을 읽을 수 없는 주체에서 권한을 우회하지 않는다.
+
+업무 commit/restore는 프로젝트 보안 기준을 사용한다. 위임 전에 검증된 execution.expected_outputs의 부모를 준비하며 해당 호출이 직접 만든 새 빈 폴더만 보안을 검증한다. 기존 폴더 ACL은 바꾸지 않는다. 접근 불가인 과거 출력 폴더를 강제 수리하거나 실패 이력을 지우지 말고 허용 범위의 새 출력 경로를 사용한다.
+
+표시용 과거 산출물 부모·TASK 입력 판독은 상대·비공개 경로 보호를 먼저 적용하고 PermissionError만 해당 항목 unavailable로 구분한다. 이를 근거 검증 성공으로 쓰지 않는다. strict 파일 해시·완료·게이트·영수증 규칙은 그대로 적용한다.

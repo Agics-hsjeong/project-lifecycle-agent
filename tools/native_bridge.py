@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools import native_observation as observation
-from tools.storage import confined
+from tools.storage import atomic_write, confined, lock
 
 SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 TOKEN = re.compile(r"(?:ieum[-_]|IEUM_BIND:)([0-9a-f]{24})(?![0-9a-f])")
@@ -248,22 +248,73 @@ def monitor(project, stop, health=None):
         stop.wait(0.75)
 
 
+def repair_access(project):
+    """Explicit, byte-preserving repair of the known inherited native policy.
+
+    This is never called by polling or normal ingestion. An authorized identity
+    must already be able to read the original bytes and their security policy.
+    """
+    if os.name != "nt":
+        raise OSError("네이티브 보안 복원은 Windows에서만 사용할 수 있습니다.")
+    from tools.windows_security import OWNER_RIGHTS, read_security
+    root = observation._root(project)
+    with lock(root):
+        path = confined(root, observation.STORE)
+        with path.open("rb") as stream:
+            raw = stream.read(observation.MAX_STATE + 1)
+        if len(raw) > observation.MAX_STATE:
+            raise ValueError("네이티브 관측 기록 크기 제한을 초과했습니다.")
+        data = json.loads(raw)
+        fields = {"schema_version", "seq", "sessions", "agents", "events", "bindings", "calls", "focus", "cursors"}
+        if (not isinstance(data, dict) or set(data) != fields or type(data.get("schema_version")) is not int
+                or data["schema_version"] != 1 or type(data.get("seq")) is not int or data["seq"] < 0
+                or not isinstance(data.get("events"), list)
+                or any(not isinstance(data.get(key), dict) for key in fields - {"schema_version", "seq", "events"})):
+            raise ValueError("생성된 네이티브 schema 1 기록만 명시적으로 복원할 수 있습니다.")
+        before = hashlib.sha256(raw).hexdigest()
+        security = read_security(path)
+        owner = read_security(root)["owner"]
+        dynamic = any(ace["sid"] == OWNER_RIGHTS and ace["mask"] != 0 for ace in security["aces"])
+        result = {"store": observation.STORE, "sha256": before, "bytes": len(raw), "content_preserved": True}
+        if not dynamic or security["owner"] == owner:
+            return {**result, "repaired": False}
+        # prepare_temp validates the exact inherited, unprotected repair pattern.
+        # No SetSecurity operation is ever applied to this original file.
+        atomic_write(path, raw, security_anchor=root, repair_owner=True)
+        with path.open("rb") as stream:
+            after = stream.read(observation.MAX_STATE + 1)
+        if hashlib.sha256(after).hexdigest() != before or after != raw:
+            raise ValueError("보안 복원 후 원본 바이트 검증이 일치하지 않습니다.")
+        return {**result, "repaired": True}
+
+
+def repair_project_access(project, paths):
+    """Explicit managed metadata repair; separate from live native polling."""
+    from tools.project_access import repair_project_access as repair
+    return repair(project, paths)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("attach", "focus", "delegate", "poll"))
+    parser.add_argument("action", choices=("attach", "focus", "delegate", "poll", "repair-access", "repair-project-access"))
     parser.add_argument("project")
     parser.add_argument("--session")
     parser.add_argument("--provider", choices=("codex", "claude"), default="codex")
     parser.add_argument("--task")
     parser.add_argument("--role")
+    parser.add_argument("--path", dest="paths", action="append", default=[])
     args = parser.parse_args(argv)
     session = args.session or ((os.environ.get("CODEX_THREAD_ID") or os.environ.get("CODEX_SESSION_ID")) if args.provider == "codex" else None)
-    if not session and args.provider == "claude":
+    if not session and args.provider == "claude" and args.action not in {"repair-access", "repair-project-access"}:
         active = [s["session_id"] for s in observation.read(args.project)["sessions"] if s["provider"] == "claude" and s["status"] in {"preparing", "running"}]
         if len(active) == 1:
             session = active[0]
     try:
-        if args.action == "attach":
+        if args.action == "repair-project-access":
+            result = repair_project_access(args.project, args.paths)
+        elif args.action == "repair-access":
+            result = repair_access(args.project)
+        elif args.action == "attach":
             result = attach(args.project, session)
         elif args.action == "poll":
             result = {"events_read": poll_sources(args.project)}
@@ -273,7 +324,11 @@ def main(argv=None):
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except (ValueError, OSError, TypeError, KeyError) as exc:
-        print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr)
+        if args.action == "repair-project-access":
+            error = {"error": "프로젝트 관리 기록 보안 복원 조건이나 접근 권한을 확인하세요.", "code": "project_access_repair_failed"}
+        else:
+            error = {"error": "네이티브 보안 복원 조건이나 접근 권한을 확인하세요.", "code": "native_access_repair_failed"} if args.action == "repair-access" else {"error": str(exc)}
+        print(json.dumps(error, ensure_ascii=False), file=sys.stderr)
         return 2
 
 

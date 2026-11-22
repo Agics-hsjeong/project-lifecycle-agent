@@ -327,20 +327,115 @@ class WorkspaceArtifactAccessTests(unittest.TestCase):
         self.assertIs(caught.exception, failure)
         self.assertFalse((self.root / "state/write.lock").exists())
 
-    def test_artifact_path_validation_stays_outside_the_permission_fallback(self):
-        for relative in ("../outside.md", "state/workspace.json", ".env", ".codex/config.toml"):
-            with self.subTest(relative=relative), self.assertRaises(ValueError):
-                workspace.valid_artifact(self.root, relative)
+    def test_artifact_lexical_guards_run_before_permission_metadata_fallback(self):
+        invalid = ("../outside.md", "/outside.md", "//server/share/a.md", "C:/outside.md", "file:stream", "state/workspace.json", ".env", ".codex/config.toml")
+        with patch.object(workspace, "confined", side_effect=PermissionError("Synthetic inaccessible path")) as resolve:
+            for relative in invalid:
+                with self.subTest(relative=relative), self.assertRaises(ValueError):
+                    workspace.valid_artifact(self.root, relative)
+        self.assertEqual(resolve.call_count, 0, "unsafe lexical paths must be rejected before metadata access")
         original = workspace.valid_artifact
-        for failure in (PermissionError(errno.EACCES, "Synthetic path validation denial"), ValueError("Synthetic path rejection")):
-            def invalid(root, relative):
-                if relative == self.blocked_ref:
-                    raise failure
-                return original(root, relative)
-            with self.subTest(error=type(failure).__name__), patch.object(workspace, "valid_artifact", invalid):
-                with self.assertRaises(type(failure)) as caught:
-                    workspace.snapshot(self.root)
-                self.assertIs(caught.exception, failure)
+        denied = PermissionError(errno.EACCES, "Synthetic path metadata denial")
+        def unavailable(root, relative):
+            if relative == self.blocked_ref:
+                raise denied
+            return original(root, relative)
+        with patch.object(workspace, "valid_artifact", unavailable):
+            self.assert_unavailable(self.artifact(workspace.snapshot(self.root), self.blocked_ref))
+            with self.assertRaises(PermissionError) as caught:
+                workspace.valid_artifact(self.root, self.blocked_ref)
+            self.assertIs(caught.exception, denied)
+        rejected = ValueError("Synthetic outside or linked path rejection")
+        def unsafe(root, relative):
+            if relative == self.blocked_ref:
+                raise rejected
+            return original(root, relative)
+        with patch.object(workspace, "valid_artifact", unsafe):
+            with self.assertRaises(ValueError) as caught:
+                workspace.snapshot(self.root)
+        self.assertIs(caught.exception, rejected)
+
+    def test_parent_lstat_denial_keeps_http_snapshot_and_native_progress_live(self):
+        self.blocked_ref = "reports/historical-blocked/synthetic-review.md"
+        self.blocked = self.root / self.blocked_ref
+        self.blocked.parent.mkdir()
+        self.blocked.write_bytes(b"Synthetic inaccessible historical artifact")
+        metadata = workspace.read(self.root)
+        execution = dict(metadata["tasks"]["TASK-001"]["execution"])
+        execution["expected_outputs"] = [self.blocked_ref, self.healthy_ref]
+        workspace.configure(self.root, {"expected_revision": self.revision,
+            "tasks": [{"id": "TASK-001", "execution": execution}]})
+        self.revision = workspace.revision(self.root)
+        parent = self.blocked.parent
+        original_lstat = Path.lstat
+        failure = PermissionError(errno.EACCES, "PRIVATE historical parent must not appear in UI", str(parent))
+        def lstat(path, *args, **kwargs):
+            if path == parent:
+                raise failure
+            return original_lstat(path, *args, **kwargs)
+        server = workspace_server.make_server(self.root, port=0)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with patch.object(Path, "lstat", lstat):
+                for index in range(3):
+                    self.observe("parent-denial-live-" + str(index), "tool_started")
+                    request = Request(server.origin + "/api/snapshot", headers={"Authorization": "Bearer " + server.human_token})
+                    with urlopen(request, timeout=5) as response:
+                        self.assertEqual(response.status, 200)
+                        raw = response.read()
+                    view = json.loads(raw)
+                    self.assert_unavailable(self.artifact(view, self.blocked_ref))
+                    self.assertEqual(self.artifact(view, self.healthy_ref)["sha256"], self.healthy_hash)
+                    task = next(t for t in view["tasks"] if t["id"] == "TASK-001")
+                    self.assertEqual(task["native_agent_id"], "synthetic-session")
+                    self.assertEqual(task["execution_state"], "running")
+                    self.assertNotIn("PRIVATE", raw.decode("utf-8"))
+                    self.assertTrue(any(event["id"] == "parent-denial-live-" + str(index) for event in native.read(self.root)["events"]))
+                with self.assertRaises(PermissionError):
+                    workspace.file_hash(self.root, self.blocked_ref)
+                with self.assertRaises(PermissionError):
+                    workspace.diff(self.root, self.blocked_ref)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertIsNotNone(self.artifact(workspace.snapshot(self.root), self.blocked_ref)["sha256"])
+        self.assertEqual(workspace.revision(self.root), self.revision)
+
+    def test_unreadable_input_directory_is_displayed_unavailable_without_hiding_unsafe_paths(self):
+        relative = "reports/historical-input-directory"
+        directory = self.root / relative
+        directory.mkdir()
+        (directory / "input.txt").write_bytes(b"Synthetic historical input")
+        original_tasks, original_lstat = workspace.task_records, Path.lstat
+        failure = PermissionError(errno.EACCES, "PRIVATE input directory metadata denial", str(directory))
+        selected = [relative]
+        def tasks(*args, **kwargs):
+            value = original_tasks(*args, **kwargs)
+            value["TASK-001"] = {**value["TASK-001"], "inputs": list(selected)}
+            return value
+        def lstat(path, *args, **kwargs):
+            if path == directory:
+                raise failure
+            return original_lstat(path, *args, **kwargs)
+        with patch.object(workspace, "task_records", tasks), patch.object(Path, "lstat", lstat):
+            self.observe("input-directory-live", "tool_started")
+            view = workspace.snapshot(self.root)
+            item = self.artifact(view, relative)
+            self.assert_unavailable(item)
+            self.assertTrue(any(edge["source"] == item["id"] and edge["target"] == "TASK-001" for edge in view["edges"]))
+            self.assertEqual(self.artifact(view, self.healthy_ref)["sha256"], self.healthy_hash)
+            task = next(task for task in view["tasks"] if task["id"] == "TASK-001")
+            self.assertEqual(task["execution_state"], "running")
+            with self.assertRaises(PermissionError):
+                workspace.file_hash(self.root, relative + "/input.txt")
+            selected[:] = ["../outside"]
+            with self.assertRaises(ValueError):
+                workspace.snapshot(self.root)
+        self.assertIsNotNone(workspace.file_hash(self.root, relative + "/input.txt"))
+        self.assertEqual(workspace.revision(self.root), self.revision)
 
     @unittest.skipUnless(os.name == "nt", "requires a real exclusive Windows file handle")
     def test_real_exclusive_file_reader_keeps_snapshot_http_200_and_progress_live(self):

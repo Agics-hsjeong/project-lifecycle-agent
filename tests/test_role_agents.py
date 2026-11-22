@@ -144,12 +144,12 @@ class RoleAgentTests(unittest.TestCase):
         preview = role_agents.codex_preview(self.project)
         original = storage.atomic_write
         failed = False
-        def fail_one(path, content):
+        def fail_one(path, content, **kwargs):
             nonlocal failed
             if Path(path).name == "ieum-spec.toml" and not failed:
                 failed = True
                 raise OSError("simulated disk write failure")
-            return original(path, content)
+            return original(path, content, **kwargs)
         with patch.object(storage, "atomic_write", side_effect=fail_one), self.assertRaises(OSError):
             role_agents.codex_install(self.project, preview)
         self.assertTrue(failed)

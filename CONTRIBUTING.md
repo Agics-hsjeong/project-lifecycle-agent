@@ -26,8 +26,10 @@ manifest 구조 검사와 로컬 도구 테스트는 실제 호스트 설치 시
 
 Windows 파일 경합은 실제 열린 읽기 핸들로 원자 교체를 막는 검사와 관리 읽기·쓰기 동시 실행으로 재현합니다. native 관측 실패 뒤 업무 저널이 생기지 않는지, 기존 JSON·미처리 이벤트·커서가 보존되는지와 충돌 해소 뒤 자동 재수신을 확인합니다. 짧은 재시도 통과와 오래 열린 파일의 지연을 구분하며 접근 제어를 완화하지 않습니다. 외부 읽기 핸들과 업무 커밋 마지막의 저널 삭제 경합도 검사하며, 재시도 소진 뒤 저널이 남고 표준 복구의 파일 대조·충돌 검사가 유지되는지 확인합니다.
 
+Windows native 보안 저장 검사는 서로 다른 실제 생성 주체와 관제 호스트에서 수행합니다. 빈 임시 파일의 DACL 검증 전에 내용을 쓰지 않는지, 프로젝트 보안 기준과 allow/deny·mask·순서·보호 상태가 유지되는지 확인합니다. 사용자 지정 소유권 불일치·unknown/null DACL·명시 정책은 중단하며, 조건부 복구는 정확한 생성 native 경로·schema 1·상속 정책과 바이트/해시 보존을 모두 검사해야 합니다. 광역 grant·소유권 강탈·ACL 오류 무시로 테스트를 통과시키지 않습니다. 합성 ACL 계약 검사와 실제 설치본의 장기 읽기·후속 저장 검증을 구분합니다.
+
 실제 호스트 검증은 사용자 설치본·실제 worker ID와 이벤트·관제 snapshot을 대조합니다. 테스트용 연결이나 재생 결과를 현재 호스트 E2E 성공이라고 보고하지 않습니다. 고객 원본은 읽기 전용으로 확인하고 합성 프로젝트에서 새 실행을 검증합니다. 공개 기록에는 세션 토큰·원시 프롬프트·추론을 포함하지 않습니다.
 
 ## 문서 사이트
 
-웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.7/website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.
+웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.8/website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.
