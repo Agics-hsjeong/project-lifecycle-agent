@@ -19,6 +19,7 @@ import {
   commandsForTask,
 } from "./model";
 import { VerificationBadge } from "./VerificationBadge";
+import { RepairFlow } from "./RepairFlow";
 import "./observer-b.css";
 
 export type Activity = {
@@ -493,6 +494,7 @@ export function Observer({
             보고된 작업과 활동을 표시합니다.
           </div>
         )}
+        <RepairFlow snapshot={snapshot} select={select} />
         {workers.length > 0 && (
           <section className="native-workers" aria-label="실제 실행 작업자">
             <header>

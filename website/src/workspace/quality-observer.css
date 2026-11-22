@@ -603,3 +603,31 @@
 .theme-light .workspace-notices .connection-error > svg {
   flex-shrink: 0;
 }
+
+/* Activity is a reading surface on phones; overview and notices share the page scroll. */
+@media (max-width: 799px) {
+  .theme-light.is-observer {
+    height: auto;
+    min-height: 100dvh;
+    grid-template-rows: 54px auto auto auto auto auto 28px;
+    overflow: visible;
+  }
+  .theme-light.is-observer .workspace-header {
+    position: sticky;
+    top: 0;
+  }
+  .theme-light.is-observer .workspace-notices {
+    max-height: none;
+    overflow: visible;
+  }
+  .theme-light.is-observer .workspace-main {
+    display: block;
+    overflow: visible;
+  }
+  .theme-light.is-observer .workspace-view {
+    overflow: visible;
+  }
+  .theme-light.is-observer .b-observer {
+    min-height: 0;
+  }
+}

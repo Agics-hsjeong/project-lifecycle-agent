@@ -459,6 +459,8 @@ export function normalise(raw: any): Snapshot {
       ["id", "title", "source", "label", "created_at", "updated_at"],
       ["task_ids"],
     );
+  const historyResultIds = new Set<string>();
+  const historySequences = new Set<number>();
   for (const run of list(raw, "history_runs")) {
     fields(run, [
       "id",
@@ -470,14 +472,93 @@ export function normalise(raw: any): Snapshot {
       "started_at",
       "completed_at",
     ]);
-    for (const step of list(run, "steps"))
+    for (const step of list(run, "steps")) {
       fields(
         step,
         ["id", "step_id", "task_id", "title", "status", "role"],
         [],
-        [],
+        ["attempts", "history_omitted"],
         ["valid", "superseded"],
       );
+      for (const field of ["attempts", "history_omitted"])
+        if (step[field] != null && !Number.isSafeInteger(step[field]))
+          throw new Error("스냅샷 재시도 횟수 형식이 잘못되었습니다.");
+      const history = list(step, "result_history");
+      if (history.length > 64)
+        throw new Error("스냅샷 재시도 기록 표시 한도를 초과했습니다.");
+      for (const row of history) {
+        fields(
+          row,
+          ["id", "status", "summary", "at", "task_id", "role"],
+          [],
+          ["attempt", "sequence"],
+        );
+        if (
+          typeof row.id !== "string" ||
+          !row.id.trim() ||
+          row.id.length > 240 ||
+          historyResultIds.has(row.id) ||
+          typeof row.summary !== "string" ||
+          [...row.summary].length > 600 ||
+          typeof row.role !== "string" ||
+          ![
+            "running",
+            "succeeded",
+            "failed",
+            "blocked",
+            "awaiting_decision",
+            "skipped",
+          ].includes(row.status)
+        )
+          throw new Error("스냅샷 시도별 실행 기록 형식이 잘못되었습니다.");
+        historyResultIds.add(row.id);
+        if (
+          (row.task_id ?? null) !== (step.task_id ?? null) ||
+          (step.role != null && row.role !== step.role)
+        )
+          throw new Error("스냅샷 시도와 작업 연결이 잘못되었습니다.");
+        if (
+          row.attempt != null &&
+          (!Number.isSafeInteger(row.attempt) ||
+            row.attempt < 1 ||
+            (step.attempts != null && row.attempt > step.attempts))
+        )
+          throw new Error("스냅샷 시도 번호가 잘못되었습니다.");
+        if (row.sequence != null) {
+          if (
+            !Number.isSafeInteger(row.sequence) ||
+            historySequences.has(row.sequence)
+          )
+            throw new Error("스냅샷 실행 원장 순서가 잘못되었습니다.");
+          historySequences.add(row.sequence);
+        }
+        if (
+          row.at != null &&
+          (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+            row.at,
+          ) ||
+            !Number.isFinite(Date.parse(row.at)))
+        )
+          throw new Error("스냅샷 실행 기록 시각이 잘못되었습니다.");
+        if (
+          !object(row.evidence_hashes) ||
+          Object.keys(row.evidence_hashes).length > 64
+        )
+          throw new Error("스냅샷 시도 근거 형식이 잘못되었습니다.");
+        for (const [file, hash] of Object.entries(row.evidence_hashes)) {
+          const parts = file.split("/");
+          if (
+            !file ||
+            file.startsWith("/") ||
+            /[:\\\u0000-\u001f\u007f]/.test(file) ||
+            parts.some((part) => !part || part === "." || part === "..") ||
+            typeof hash !== "string" ||
+            !/^[0-9a-f]{64}$/.test(hash)
+          )
+            throw new Error("스냅샷 시도 근거 경로·해시가 잘못되었습니다.");
+        }
+      }
+    }
   }
   for (const session of list(raw, "native_sessions"))
     fields(session, [
@@ -722,6 +803,11 @@ function executionRef(row: any) {
     fields(row.step_ref, ["run_id", "step_id"]);
     if (!row.step_ref.run_id || !row.step_ref.step_id)
       throw new Error("스냅샷 실행 참조 형식이 잘못되었습니다.");
+    if (
+      (row.run_id != null && row.run_id !== row.step_ref.run_id) ||
+      (row.step_id != null && row.step_id !== row.step_ref.step_id)
+    )
+      throw new Error("스냅샷 실행 참조의 두 표현이 일치하지 않습니다.");
   }
 }
 function stepRef(row: any) {

@@ -1188,11 +1188,14 @@ def snapshot(folder):
         {"id": run["id"], "run_id": run["id"], "title": run["title"], "source": "legacy_run",
          "task_ids": [t["id"] for t in result["tasks"] if t.get("run_id") == run["id"]]}
         for run in run_store["runs"] if run["id"] not in declared_runs] + store["execution_scopes"]
+    from tools.attempt_history import project_steps
+    attempt_history = project_steps(run_store["runs"], result["tasks"], lifecycle.events(root))
     result["history_runs"] = [{"id": run["id"], "title": run["title"], "scope_id": run.get("scope_id", run["id"]),
         "steps": [{"id": step["id"], "title": step["title"], "status": step["status"],
                    "valid": runs.valid_step(root, run, step), "inputs": step["inputs"],
                    "expected_outputs": step.get("expected_outputs", []), "receipt_hashes": step.get("receipt_hashes", {}),
-                   "superseded": run["id"] + "/" + step["id"] in store["superseded_steps"]}
+                   "superseded": run["id"] + "/" + step["id"] in store["superseded_steps"],
+                   **attempt_history[(run["id"], step["id"])]}
                   for step in run["steps"]]} for run in run_store["runs"]]
     result["history_tasks"] = [t for t in result["tasks"] if t["id"] not in current_ids]
     result["summary_counts"] = _summary_counts(t for t in result["tasks"] if t["id"] in current_ids)
