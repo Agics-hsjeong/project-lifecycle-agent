@@ -269,6 +269,72 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(notices, [])
         self.assertEqual(self.calls, [])
 
+    def test_two_jobs_complete_under_independent_twenty_ms_snapshot_reader(self):
+        stop, worker, result, errors = self.launch_waiting()
+        self.wait_for(lambda: workspace.snapshot(self.root).get("runners"))
+        reader_stop = threading.Event()
+        stats = {"reads": 0, "contentions": 0}
+        observer_errors = []
+        def observe():
+            while not reader_stop.is_set():
+                try:
+                    workspace.snapshot(self.root)
+                    stats["reads"] += 1
+                except ValueError as error:
+                    if runner._contention(error):
+                        stats["contentions"] += 1
+                    else:
+                        observer_errors.append(error)
+                        return
+                reader_stop.wait(0.02)
+        reader = threading.Thread(target=observe)
+        reader.start()
+        try:
+            self.decide()
+            self.wait_for(lambda: len(self.calls) == 2)
+            self.wait_for(lambda: all(q["status"] == "completed" for q in workspace.snapshot(self.root)["commands"]))
+            final = runner._snapshot(self.root)
+            self.assertEqual([q["status"] for q in final["commands"]], ["completed", "completed"])
+            self.assertTrue(all(q.get("notes") == "Synthetic fixture output written" for q in final["commands"]))
+            self.assertGreater(stats["reads"], 0)
+            self.assertEqual(observer_errors, [])
+            stop.set()
+            worker.join(5)
+            self.assertFalse(worker.is_alive())
+            self.assertEqual(errors, [])
+            self.assertEqual(result["completed"], 2)
+            self.assertEqual(result["failed"], 0)
+            self.assertEqual(self.calls, [("TASK-002", "backend"), ("TASK-003", "qa")])
+        finally:
+            reader_stop.set()
+            reader.join(5)
+            stop.set()
+            worker.join(5)
+
+    def test_retry_jitter_escapes_periodic_reader_phase_without_extending_deadline(self):
+        clock = {"ns": 0}
+        attempts = []
+        def sleep(seconds):
+            clock["ns"] += round(seconds * 1_000_000_000)
+        def available_gap():
+            # A 60 ms read transaction every 80 ms leaves a real 20 ms write gap.
+            # A fixed 40 ms retry visits only occupied phases 0 and 40 ms.
+            phase = clock["ns"] % 80_000_000
+            attempts.append(phase)
+            if phase < 60_000_000:
+                try:
+                    raise FileExistsError("Synthetic reader owns exact write.lock")
+                except FileExistsError as error:
+                    raise ValueError("Synthetic real lock contention") from error
+            return "writer acquired available gap"
+        with patch.object(runner.time, "monotonic", side_effect=lambda: clock["ns"] / 1_000_000_000), \
+             patch.object(runner.time, "sleep", side_effect=sleep), \
+             patch.object(runner.random, "uniform", side_effect=[0.02, 0.05]):
+            result = runner._retry(available_gap, seconds=0.3)
+        self.assertEqual(result, "writer acquired available gap")
+        self.assertEqual(attempts, [0, 20_000_000, 70_000_000])
+        self.assertLess(clock["ns"], 300_000_000)
+
     def test_revision_is_written_then_pauses_for_new_human_approval(self):
         self.decide("request_revision")
         result = self.execute(max_jobs=1)

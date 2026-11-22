@@ -32,7 +32,7 @@ def _retry(function, seconds=3.0):
             revision_changed = isinstance(error, workspace.Conflict) and "진행 기록이 변경" in str(error)
             if not (_contention(error) or revision_changed) or time.monotonic() >= deadline:
                 raise
-            time.sleep(0.04)
+            time.sleep(random.uniform(0.02, 0.06))
 
 
 def _snapshot(root):
@@ -47,14 +47,14 @@ def _task_blockers(root, tasks, identifier):
 
 def _host(root, identity, kind, **fields):
     def action():
-        payload = {**identity, "kind": kind, "expected_revision": _snapshot(root)["revision"], **fields}
+        payload = {**identity, "kind": kind, "expected_revision": workspace.revision(root), **fields}
         return workspace.host_event(root, payload)
     return _retry(action)
 
 
 def _telemetry(root, runner, status, **fields):
     def action():
-        return workspace.runner_event(root, {"expected_revision": _snapshot(root)["revision"],
+        return workspace.runner_event(root, {"expected_revision": workspace.revision(root),
             "runner_id": runner["runner_id"], "provider": runner["provider"], "pid": os.getpid(),
             "status": status, **fields})
     return _retry(action)
@@ -185,7 +185,7 @@ def _run_result(root, task, command_id, status, evidence_refs, notes):
         return None
     result_key = "runner:" + command_id + ":" + task.get("_attempt_id", "recovery-" + uuid.uuid4().hex) + ":" + status
     def action():
-        return runs.result(root, {"expected_revision": _snapshot(root)["revision"],
+        return runs.result(root, {"expected_revision": workspace.revision(root),
             "run_id": task["run_id"], "step_id": task["step_id"],
             "key": result_key, "status": status,
             "evidence_refs": evidence_refs, "notes": notes}, actor="workspace-runner")
@@ -465,7 +465,7 @@ def _execute(root, provider, task, command, role, lease, job_dir, run_job, stop_
         _activity(root, identity, task, command, 'completed', role['label'] + (' 산출물·등록 검증 완료' if verification_summary['status'] == 'passed' else ' 산출물 확인 · 실행 검증 근거 별도'), status='completed')
         if review_target and verification_summary['status'] == 'passed':
             def record_review():
-                return workspace.review_event(root, {'expected_revision':_snapshot(root)['revision'],
+                return workspace.review_event(root, {'expected_revision':workspace.revision(root),
                     'review_id':'REVIEW-'+command['id'], 'task_id':review_target['id'], 'agent_id':identity['agent_id'],
                     'provider':provider, 'role':role['id'], 'outcome':'passed',
                     'summary':'독립 역할 검토와 등록된 검증이 완료되었습니다.', 'evidence_refs':refs,
@@ -500,7 +500,7 @@ def _execute(root, provider, task, command, role, lease, job_dir, run_job, stop_
         repair = None
         if observed.get('failure_kind') == 'verification_failed' and role['id'] in {'qa', 'reviewer', 'security'} and not stop_event.is_set():
             def schedule():
-                return workspace.schedule_repair(root, {'expected_revision': _snapshot(root)['revision'],
+                return workspace.schedule_repair(root, {'expected_revision': workspace.revision(root),
                     'failed_command_id': command['id'], 'feedback_refs': observed.get('feedback_refs', []),
                     'check_hashes': observed.get('check_hashes', {}), 'summary': '독립 QA 검증 실패를 담당 개발자에게 전달합니다.'})
             try:
