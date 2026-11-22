@@ -10,7 +10,7 @@
 
 ## 호스트에서 직접 진행하기
 
-현재 AI 호스트가 주 실행자다. 이음 스킬은 실제 프로젝트를 확인하고 필요한 역할의 native Agent/Task/spawn을 실행한다. 관제 연결이 있으면 주 에이전트가 `workspace-activity`로 실제 작업 시작·행동·전달·검토 결과를 기록한다. TASK/RUN의 완료는 기존 엔진의 근거·검증 규칙으로 기록한다.
+현재 AI 호스트가 주 실행자다. 이음 스킬은 실제 프로젝트를 확인하고 필요한 역할의 native Agent/Task/spawn을 실행한다. 관제 연결이 있으면 호스트 훅과 관측기가 세션별 실제 작업자 시작·종료·공개 도구 행동을 수집한다. 주 에이전트는 TASK와 역할의 위임 연결을 준비하고, `workspace-activity`로 검토·전달 같은 보충 활동을 기록할 수 있다. TASK/RUN의 완료는 기존 엔진의 근거·검증 규칙으로 기록한다.
 
 활동 보고는 대화나 도구를 실제 수행한 호스트의 보고다. 연결하지 않은 외부 대화 전체를 자동 수집하거나 숨은 추론을 표시하는 기능이 아니다. 사용자가 추가 명령을 외우지 않도록 에이전트가 기록을 처리한다. 새 프로젝트 체계를 일반적인 코딩 요청에 강제하지 않는다.
 
@@ -59,7 +59,7 @@ CLI에는 기존 로그인과 실제 사용 한도가 적용된다. 컴퓨터와
 
 ## 기록과 복구
 
-`state/workspace-activity.json`은 제한된 공개 활동 타임라인이다. `state/workspace-runtime.json`은 실제 실행기·PID·heartbeat, `state/workspace.json`은 작업 연결·대기열·검토·기존 결정 이력이다. 짧은 활동 보고가 사업 원장의 revision을 계속 바꾸지 않도록 분리한다. `reports/runner/`에는 독립 검증과 완료·실패 영수증을 기록한다. 사용량은 실제 보고값만 합산하며 미제공 값은 미집계다.
+`state/workspace-native.json`은 세션별 실제 작업자·위임 연결·정규화한 호스트 이벤트다. `state/workspace-activity.json`은 제한된 공개 활동 타임라인이다. `state/workspace-runtime.json`은 실제 실행기·PID·heartbeat, `state/workspace.json`은 작업 연결·대기열·검토·기존 결정 이력이다. 짧은 활동 보고가 사업 원장의 revision을 계속 바꾸지 않도록 분리한다. `reports/runner/`에는 독립 검증과 완료·실패 영수증을 기록한다. 사용량은 실제 보고값만 합산하며 미제공 값은 미집계다.
 
 정상 중지는 소유 실행기의 stop/Ctrl+C로 수행하고 해당 자식만 종료한다. 살아 있는 중복 실행기를 거절하며 비정상 종료된 이전 작업은 확인 없이 자동 중복 실행하지 않는다. 원본이 바뀌면 덮어쓰지 않고 새 기준으로 조율한다.
 
@@ -77,6 +77,18 @@ Windows의 사용자 전용 Python ACL을 바꾸지 않는다. 공개 Python 실
 
 검증용 공개 런타임은 긴 작업 경로에서도 Windows 실행 파일 경로 제한에 걸리지 않도록 짧은 소유 OS 임시 경로에 만들며, 작업 사본 밖 읽기 전용으로 연결한다. 검증 후에는 소유 경로·링크 여부를 확인해 이 런타임만 정리한다. 모델이 작성한 산출물은 기존 고객 밖 작업 사본에 그대로 보존한다.
 
+
+## 실제 실행 연결과 범위 — 2.0.0-beta.6
+
+기본 사용은 AI 대화의 자연어 요청이다. 관제 사용자는 ID·JSON을 입력하지 않는다. 에이전트는 위임 전에 실제 TASK·역할·provider·session을 연결하고 호스트 이벤트의 native ID를 결합한다. 같은 역할만 보고 TASK를 추정하지 않으며 모호한 호출은 미연결로 남긴다. 호스트가 변경된 플러그인 훅의 신뢰 확인을 표시하면 사용자가 해당 UI에서 검토해야 한다. 이를 건너뛰거나 임의로 신뢰 설정을 바꾸지 않는다.
+
+`runs.create`의 선택 필드 `bindings`는 `{ "STEP-001": "TASK-001" }`, `scope`는 `{ "id": "api-revision", "title": "API 수정", "supersedes": ["RUN-001"] }` 형식이다. RUN 생성·TASK 바인딩·범위 선언을 한 트랜잭션에 저장한다. 기존 5개 필수 필드 API는 그대로 지원한다. TASK의 이전 STEP은 결과·해시를 지우지 않고 대체 이력에 남는다. `workspace-configure.current_scope`에 실제 `task_ids`와 `title`을 지정하면 명시 범위를 선택하고 `null`이면 최근 RUN 기준으로 돌아간다. 실행 계획을 새로 선언하면 새 RUN이 최근 범위가 된다.
+
+Snapshot의 `tasks`는 전체 비중복 작업 목록, `current_scope.task_ids`는 현재 표시 범위다. `summary_counts`는 현재 범위, `all_summary_counts`는 전체 작업, `history_tasks`는 현재 범위 밖 작업이다. `history_runs`에는 대체된 STEP의 상태·현재 유효성·원본 영수증 해시도 남는다. `execution_scopes`는 독립 실행 선언을 보존한다. 유효성에 따라 최근 RUN을 건너뛰거나 실패 이력을 삭제하지 않는다.
+
+각 작업의 `ledger_status`는 원장·무결성 검사 상태이고 `execution_state`는 호스트에서 관측한 실행 상태다. `native_agent_id`, `session_id`, `runtime_source`와 활성 native ID를 함께 제공한다. native 종료는 `result_pending`일 수 있으며 검증 통과나 사람 승인을 생성하지 않는다. 완료·실패·변경됨 근거는 기존 엔진 규칙을 유지한다. 호스트 이벤트에는 정규화한 공개 메타데이터만 허용하고 원시 프롬프트·결과·추론·전사 경로는 받지 않는다.
+
+TASK 생성·변경에서는 제목을 메타데이터에 함께 저장한다. 선택 필드 `title`을 명시할 수 있고 `next_action` 변경은 제목을 덮지 않는다. 구형 제목은 연결된 RUN·이전 미완료 기록으로 복원하며 조회는 기록을 쓰지 않는다.
 
 ## 강화된 검증과 관찰 — 2.0.0-beta.5
 

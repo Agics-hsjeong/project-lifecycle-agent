@@ -5,6 +5,7 @@ an explicit execution policy, and cannot turn their result into human approval.
 """
 import json
 import os
+import random
 from pathlib import Path
 import tempfile
 import threading
@@ -80,8 +81,13 @@ class StopRequested(RuntimeError):
 
 class RunnerLease:
     """Single writer process ownership; never removes a live owner's lock."""
-    def __init__(self, root, provider):
+    def __init__(self, root, provider, stop_event=None, on_wait=None):
+        if on_wait is not None and not callable(on_wait):
+            raise ValueError("실행기 시작 대기 알림은 내부 콜백이어야 합니다.")
         self.root = root
+        self.stop_event = stop_event
+        self.on_wait = on_wait
+        self.acquired = False
         self.path = confined(root, LEASE)
         self.previous = None
         self.record = {"runner_id": "RUNNER-" + uuid.uuid4().hex, "provider": provider,
@@ -90,6 +96,8 @@ class RunnerLease:
     def __enter__(self):
         def acquire():
             with lock(self.root):
+                if self.stop_event is not None and self.stop_event.is_set():
+                    return False
                 if self.path.exists():
                     previous = json.loads(self.path.read_text(encoding="utf-8"))
                     if not isinstance(previous, dict) or type(previous.get("pid")) is not int:
@@ -102,7 +110,25 @@ class RunnerLease:
                 fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 with os.fdopen(fd, "wb") as handle:
                     handle.write(json_bytes(self.record))
-        _retry(acquire)
+                return True
+        if self.stop_event is None:
+            self.acquired = _retry(acquire)
+            return self
+        last_notice = None
+        while not self.stop_event.is_set():
+            try:
+                self.acquired = acquire()
+                return self
+            except ValueError as error:
+                if not _contention(error):
+                    raise
+                now = time.monotonic()
+                if self.on_wait is not None and last_notice is None:
+                    self.on_wait({"status": "starting", "reason": "project_busy", "message": "프로젝트 기록 작업을 기다립니다."})
+                    last_notice = now
+                # Startup owns no lease or work yet. A read/write transaction
+                # ending later is safe to await, and cancellation remains prompt.
+                self.stop_event.wait(random.uniform(0.02, 0.06))
         return self
 
     def update(self, **fields):
@@ -113,6 +139,8 @@ class RunnerLease:
         atomic_write(self.path, json_bytes(self.record))
 
     def __exit__(self, exc_type, exc_value, traceback):
+        if not self.acquired:
+            return
         if not self.path.exists():
             return
         current = json.loads(self.path.read_text(encoding="utf-8"))
@@ -505,6 +533,9 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
     root = starter.load_project(folder)[0]
     stop_event = stop_event or threading.Event()
     options = dict(provider_options or {})
+    on_startup_wait = options.pop("on_startup_wait", None)
+    if on_startup_wait is not None and not callable(on_startup_wait):
+        raise ValueError("실행기 시작 대기 알림은 내부 콜백이어야 합니다.")
     max_jobs = options.get("max_jobs")
     if max_jobs is not None and (type(max_jobs) is not int or max_jobs <= 0):
         raise ValueError("max_jobs는 양수여야 합니다.")
@@ -517,11 +548,16 @@ def run_forever(folder, provider, stop_event=None, poll_interval=1.0, provider_o
     if job_root.is_relative_to(root):
         raise ValueError("호스트 원시 로그는 고객 프로젝트 밖의 실행 폴더에 보관합니다.")
     output = {"provider": provider, "completed": 0, "failed": 0, "jobs": [], "recovered": []}
-    with RunnerLease(root, provider) as lease:
+    with RunnerLease(root, provider, stop_event=stop_event, on_wait=on_startup_wait) as lease:
+        if not lease.acquired:
+            output["stopped"] = True
+            return output
         output["runner_id"] = lease.record["runner_id"]
         output["recovered"] = _recover_previous(root, lease)
         output["recovered"].extend(_recover_orphaned_claims(root))
         _telemetry(root, lease.record, "starting", notes="관제 실행기 시작")
+        if on_startup_wait is not None:
+            on_startup_wait({"status": "running", "reason": "ready", "message": None})
         last_idle = 0.0
         session_started = time.monotonic()
         try:

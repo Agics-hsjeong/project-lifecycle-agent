@@ -91,6 +91,7 @@ class RunnerTests(unittest.TestCase):
     def launch_waiting(self, function=None):
         stop = threading.Event()
         result, errors = {}, []
+        self.background_errors = errors
         def work():
             try:
                 result.update(runner.run_forever(self.root, "codex", stop_event=stop, poll_interval=0.02,
@@ -108,6 +109,8 @@ class RunnerTests(unittest.TestCase):
     def wait_for(self, predicate, seconds=8):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
+            if getattr(self, "background_errors", None):
+                raise self.background_errors[0]
             try:
                 if predicate():
                     return
@@ -132,6 +135,139 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(starter.read_table(self.root, "reviews"), [])
         self.assertEqual(starter.load_project(self.root)[1]["current_stage"], "discovery")
         self.assertIsNone(workspace.snapshot(self.root)["usage"]["tokens"])
+
+    def test_startup_resumes_after_real_long_business_lock_and_finishes_two_jobs(self):
+        from tools.storage import lock
+        ready = threading.Event()
+        def hold():
+            with lock(self.root):
+                ready.set()
+                time.sleep(3.25)
+        reader = threading.Thread(target=hold)
+        reader.start()
+        self.addCleanup(reader.join)
+        self.assertTrue(ready.wait(5))
+        stop, notices, result, errors = threading.Event(), [], {}, []
+        waiting = threading.Event()
+        def notice(payload):
+            notices.append(payload)
+            if payload["reason"] == "project_busy":
+                waiting.set()
+        def work():
+            try:
+                result.update(runner.run_forever(self.root, "codex", stop_event=stop, poll_interval=0.02,
+                    provider_options={"run_job": self.fake, "max_jobs": 2, "job_root": self.base / "native", "on_startup_wait": notice}))
+            except Exception as error:
+                errors.append(error)
+        worker = threading.Thread(target=work)
+        worker.start()
+        self.background_errors = errors
+        def cleanup():
+            stop.set()
+            worker.join(5)
+        self.addCleanup(cleanup)
+        self.assertTrue(waiting.wait(1))
+        self.wait_for(lambda: workspace.snapshot(self.root).get("runners"))
+        self.wait_for(lambda: any(n["reason"] == "ready" for n in notices))
+        self.assertEqual(self.calls, [])
+        self.decide()
+        self.wait_for(lambda: len(self.calls) == 2)
+        self.wait_for(lambda: all(q["status"] == "completed" for q in workspace.snapshot(self.root)["commands"]))
+        worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(result["completed"], 2)
+        self.assertEqual(self.calls, [("TASK-002", "backend"), ("TASK-003", "qa")])
+        self.assertFalse((self.root / runner.LEASE).exists())
+
+    def test_stop_during_startup_lock_wait_preserves_other_live_lease_and_lock(self):
+        from tools.storage import lock
+        with runner.RunnerLease(self.root, "codex") as owner:
+            original_lease = owner.path.read_bytes()
+            ready, release, waiting, stop = (threading.Event() for _ in range(4))
+            result, errors = {}, []
+            def hold():
+                with lock(self.root):
+                    ready.set()
+                    release.wait(5)
+            reader = threading.Thread(target=hold)
+            reader.start()
+            self.assertTrue(ready.wait(5))
+            original_lock = (self.root / "state/write.lock").read_bytes()
+            def work():
+                try:
+                    result.update(runner.run_forever(self.root, "codex", stop_event=stop,
+                        provider_options={"run_job": self.fake, "job_root": self.base / "native",
+                            "on_startup_wait": lambda event: waiting.set()}))
+                except Exception as error:
+                    errors.append(error)
+            worker = threading.Thread(target=work)
+            worker.start()
+            try:
+                self.assertTrue(waiting.wait(1))
+                stop.set()
+                worker.join(1)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(errors, [])
+                self.assertTrue(result["stopped"])
+                self.assertEqual(result["completed"], 0)
+                self.assertEqual(owner.path.read_bytes(), original_lease)
+                self.assertEqual((self.root / "state/write.lock").read_bytes(), original_lock)
+                self.assertEqual(self.calls, [])
+            finally:
+                stop.set()
+                release.set()
+                worker.join(5)
+                reader.join(5)
+
+    def test_startup_does_not_retry_permission_errors(self):
+        notices = []
+        with patch.object(runner, "lock", side_effect=PermissionError("Synthetic permission denial")) as attempted:
+            with self.assertRaises(PermissionError):
+                runner.run_forever(self.root, "codex", provider_options={"run_job": self.fake,
+                    "job_root": self.base / "native", "on_startup_wait": notices.append})
+        self.assertEqual(attempted.call_count, 1)
+        self.assertEqual(notices, [])
+        self.assertFalse((self.root / runner.LEASE).exists())
+
+    def test_startup_does_not_wait_for_another_live_runner(self):
+        notices = []
+        with runner.RunnerLease(self.root, "codex") as owner:
+            previous = owner.path.read_bytes()
+            with self.assertRaises(runner.RunnerAlreadyRunning):
+                runner.run_forever(self.root, "codex", provider_options={"run_job": self.fake,
+                    "job_root": self.base / "native", "on_startup_wait": notices.append})
+            self.assertEqual(owner.path.read_bytes(), previous)
+        self.assertEqual(notices, [])
+        self.assertEqual(self.calls, [])
+
+    def test_startup_does_not_retry_an_unfinished_journal(self):
+        path = self.root / "state/pending.json"
+        path.write_bytes(json_bytes({"schema_version": 1, "entries": []}))
+        notices = []
+        try:
+            with self.assertRaisesRegex(ValueError, "미완료 변경"):
+                runner.run_forever(self.root, "codex", provider_options={"run_job": self.fake,
+                    "job_root": self.base / "native", "on_startup_wait": notices.append})
+            self.assertEqual(notices, [])
+            self.assertFalse((self.root / runner.LEASE).exists())
+            self.assertTrue(path.is_file())
+        finally:
+            path.unlink()
+
+    def test_already_stopped_startup_does_not_inspect_or_touch_other_lease(self):
+        notices = []
+        with runner.RunnerLease(self.root, "codex") as owner:
+            previous = owner.path.read_bytes()
+            stop = threading.Event()
+            stop.set()
+            result = runner.run_forever(self.root, "codex", stop_event=stop, provider_options={"run_job": self.fake,
+                "job_root": self.base / "native", "on_startup_wait": notices.append})
+            self.assertTrue(result["stopped"])
+            self.assertEqual(result["completed"], 0)
+            self.assertEqual(owner.path.read_bytes(), previous)
+        self.assertEqual(notices, [])
+        self.assertEqual(self.calls, [])
 
     def test_revision_is_written_then_pauses_for_new_human_approval(self):
         self.decide("request_revision")

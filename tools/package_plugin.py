@@ -11,7 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-FOLDERS = (".codex-plugin", ".claude-plugin", "skills", "agents", "blueprint", "tools", "tests", "docs")
+FOLDERS = (".codex-plugin", ".claude-plugin", "skills", "agents", "blueprint", "tools", "tests", "docs", "hooks")
 FILES = ("plugin.json", "README.md", "CHANGELOG.md", "AGENTS.md", ".gitignore", ".gitattributes", "LICENSE", "CONTRIBUTING.md", ".agents/plugins/marketplace.json", ".github/workflows/ci.yml")
 
 
@@ -26,7 +26,7 @@ def package(output=None):
         raise ValueError("호스트별 플러그인 이름·버전이 다릅니다.")
     if json.loads((ROOT / "blueprint/project.json").read_text(encoding="utf-8"))["starter_version"] != metadata["version"]:
         raise ValueError("기본형과 플러그인 버전이 다릅니다.")
-    for resource in ("tools/starter.py", "tools/lifecycle.py", "tools/storage.py", "tools/intake.py", "tools/proposal.py", "tools/reference_templates.py", "tools/template_analysis.py", "blueprint/proposal/package.json", "skills/project-lifecycle/SKILL.md"):
+    for resource in ("hooks/hooks.json", "hooks/codex.json", "tools/native_hooks.py", "tools/native_bridge.py", "tools/native_observation.py", "tools/starter.py", "tools/lifecycle.py", "tools/storage.py", "tools/intake.py", "tools/proposal.py", "tools/reference_templates.py", "tools/template_analysis.py", "blueprint/proposal/package.json", "skills/project-lifecycle/SKILL.md"):
         if not (ROOT / resource).is_file():
             raise ValueError(f"필수 리소스 누락: {resource}")
     destination = Path(output) if output else ROOT / "dist" / f"{metadata['name']}-v{metadata['version']}.zip"

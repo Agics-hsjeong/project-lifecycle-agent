@@ -11,7 +11,13 @@ import {
 } from "./model";
 import { Icon } from "./Views";
 import { RoleTimeline } from "./RoleTimeline";
-import { hasIssue, waiting } from "./model";
+import {
+  hasIssue,
+  waiting,
+  executionLabel,
+  nativeWorkers,
+  commandsForTask,
+} from "./model";
 import { VerificationBadge } from "./VerificationBadge";
 import "./observer-b.css";
 
@@ -57,12 +63,18 @@ export function ageLabel(at: string | undefined, now: number) {
   });
 }
 export function freshAgent(agent: any, now: number) {
+  if (agent.superseded) return false;
   const last = Date.parse(agent.last_seen || agent.last_activity_at || "");
-  return (
-    ["running", "active", "working"].includes(agent.status) &&
-    Number.isFinite(last) &&
-    now - last < 90000
-  );
+  const running = [
+    "running",
+    "active",
+    "working",
+    "starting",
+    "preparing",
+  ].includes(agent.status);
+  // Native lifecycle records remain running during long reasoning without tool events.
+  if (agent.native_agent_id && agent.session_id) return running;
+  return running && Number.isFinite(last) && now - last < 90000;
 }
 export function taskIsLive(
   snapshot: Snapshot,
@@ -89,11 +101,20 @@ export function taskIsLive(
   );
 }
 export function durationLabel(task: Task, now: number) {
+  const hasNative = Boolean(task.native_started_at);
   const hasAttempt = Boolean(task.attempt_started_at);
   const start = Date.parse(
-    (hasAttempt ? task.attempt_started_at : task.actual_start) || "",
+    (hasNative
+      ? task.native_started_at
+      : hasAttempt
+        ? task.attempt_started_at
+        : task.actual_start) || "",
   );
-  const finish = hasAttempt ? task.attempt_finished_at : task.actual_end;
+  const finish = hasNative
+    ? task.native_finished_at
+    : hasAttempt
+      ? task.attempt_finished_at
+      : task.actual_end;
   let end = Date.parse(finish || "");
   if (!Number.isFinite(end) && !active(task)) {
     const terminal = [...(task.activity || [])]
@@ -121,6 +142,14 @@ export function durationLabel(task: Task, now: number) {
   return `${Math.floor(seconds / 3600)}시간 ${Math.floor((seconds % 3600) / 60)}분`;
 }
 const kindLabel: Record<string, string> = {
+  session_started: "세션 준비",
+  session_idle: "호스트 대기",
+  session_ended: "세션 종료",
+  agent_started: "작업자 실행",
+  agent_completed: "작업자 실행 종료",
+  agent_failed: "작업자 실행 실패",
+  delegation_started: "작업 위임",
+  delegation_bound: "작업자 연결",
   action: "작업",
   tool_started: "도구 실행",
   tool_completed: "도구 결과",
@@ -210,6 +239,11 @@ export function ActivityFeed({
                 </time>
               </div>
               <p>{event.summary}</p>
+              {event.native_agent_id && (
+                <code className="event-native-id" title={event.native_agent_id}>
+                  작업자 {event.native_agent_id}
+                </code>
+              )}
               <div className="event-foot">
                 <span>
                   {kindLabel[event.kind || ""] || event.kind || "기록"}
@@ -248,6 +282,7 @@ export function ActivityFeed({
   );
 }
 function taskNote(task: Task, snapshot: Snapshot, latest?: Activity) {
+  if (executionLabel(task)) return executionLabel(task);
   if (latest && active(task)) return latest.summary;
   if (active(task))
     return (
@@ -308,8 +343,8 @@ function taskProvider(task: Task, snapshot: Snapshot, events: Activity[]) {
   const latest = events
     .filter((event) => event.task_id === task.id && event.provider)
     .at(-1);
-  const command = (snapshot.commands || [])
-    .filter((item: any) => item.task_id === task.id && item.agent_id)
+  const command = commandsForTask(task, snapshot)
+    .filter((item: any) => item.agent_id)
     .at(-1);
   const identifier = (value: string | undefined) =>
     (value || "").replace(/^agent:/, "");
@@ -321,9 +356,10 @@ function taskProvider(task: Task, snapshot: Snapshot, events: Activity[]) {
       .reverse()
       .find(
         (item) =>
-          item.task_id === task.id || (item.task_ids || []).includes(task.id),
+          !item.superseded &&
+          (item.task_id === task.id || (item.task_ids || []).includes(task.id)),
       );
-  const provider = latest?.provider || agent?.provider || task.provider;
+  const provider = agent?.provider || task.provider || latest?.provider;
   return provider === "codex"
     ? "Codex"
     : provider === "claude"
@@ -333,15 +369,14 @@ function taskProvider(task: Task, snapshot: Snapshot, events: Activity[]) {
         : "호스트 미보고";
 }
 function currentCommand(task: Task, snapshot: Snapshot) {
-  return (snapshot.commands || [])
-    .filter((command: any) => command.task_id === task.id)
-    .at(-1);
+  return commandsForTask(task, snapshot).at(-1);
 }
 function taskHasIssue(task: Task, snapshot: Snapshot) {
   return hasIssue(task, snapshot);
 }
 
-function statusText(task: Task, live: boolean, snapshot: Snapshot) {
+export function statusText(task: Task, live: boolean, snapshot: Snapshot) {
+  if (executionLabel(task)) return executionLabel(task);
   if (active(task)) return live ? "진행 중" : "활동 확인 필요";
   if (task.status !== "stale" && taskHasIssue(task, snapshot))
     return "실행 실패";
@@ -377,6 +412,7 @@ export function Observer({
   toolbar?: React.ReactNode;
 }) {
   const events = useMemo(() => activityOf(snapshot), [snapshot]);
+  const workers = nativeWorkers(snapshot);
   const [filter, setFilter] = useState("all");
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [allActivity, setAllActivity] = useState(false);
@@ -456,6 +492,58 @@ export function Observer({
             <Icon name="info" size={16} /> 연결을 확인하고 있습니다. 마지막
             보고된 작업과 활동을 표시합니다.
           </div>
+        )}
+        {workers.length > 0 && (
+          <section className="native-workers" aria-label="실제 실행 작업자">
+            <header>
+              <h2>실제 작업자</h2>
+              <span>{workers.length}명 · 역할 배정과 별도로 집계</span>
+            </header>
+            <div>
+              {workers.map((agent) => (
+                <button
+                  key={`${agent.session_id}:${agent.native_agent_id}`}
+                  onClick={() => select({ kind: "agent", id: agent.id })}
+                  className={
+                    connected && freshAgent(agent, now) ? "is-live" : ""
+                  }
+                >
+                  <span className="native-worker-heading">
+                    <i aria-hidden="true" />
+                    <strong>
+                      {agent.display_name ||
+                        ROLE[agent.role] ||
+                        agent.name ||
+                        agent.role ||
+                        "실행 작업자"}
+                    </strong>
+                    <small>
+                      {connected && freshAgent(agent, now)
+                        ? agent.status === "preparing"
+                          ? "프로젝트 준비 중"
+                          : "실행 중"
+                        : agent.status === "idle"
+                          ? "호스트 대기 중"
+                          : ["completed", "stopped"].includes(agent.status)
+                            ? "실행 종료"
+                            : agent.status === "failed"
+                              ? "실행 실패"
+                              : "활동 확인 필요"}
+                    </small>
+                  </span>
+                  <code title={agent.native_agent_id}>
+                    {agent.native_agent_id}
+                  </code>
+                  <span>
+                    {(agent.task_ids || []).length || agent.task_id
+                      ? `${(agent.task_ids || [agent.task_id]).filter(Boolean).length}개 작업 연결`
+                      : "작업 연결 대기"}{" "}
+                    · {ageLabel(agent.last_seen || agent.last_activity_at, now)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
         <section className="b-task-section" aria-labelledby="b-task-title">
           <header className="b-section-header">
@@ -561,6 +649,14 @@ export function Observer({
                             {ROLE[task.role] || task.role || "담당 미정"}
                           </strong>
                           <small>{taskProvider(task, snapshot, events)}</small>
+                          {task.native_agent_id && (
+                            <code
+                              className="native-task-id"
+                              title={task.native_agent_id}
+                            >
+                              {task.native_agent_id}
+                            </code>
+                          )}
                         </td>
                         <td className="b-cell-action" data-label="상태">
                           <span
@@ -726,10 +822,22 @@ export function Observer({
         ) : (
           <div className="b-context-empty">
             <Icon name="agent" size={28} />
-            <h2>작업을 선택하세요</h2>
+            <h2>
+              {workers.length
+                ? "호스트 활동을 수신하고 있습니다"
+                : "작업을 선택하세요"}
+            </h2>
             <p>
-              담당 역할과 현재 행동, 관련 파일과 실제 활동을 확인할 수 있습니다.
+              {workers.length
+                ? "작업 ID가 연결되면 역할별 작업에 실행 상태가 표시됩니다."
+                : "담당 역할과 현재 행동, 관련 파일과 실제 활동을 확인할 수 있습니다."}
             </p>
+            <ActivityFeed
+              events={filteredEvents}
+              now={now}
+              select={select}
+              compact
+            />
           </div>
         )}
       </aside>

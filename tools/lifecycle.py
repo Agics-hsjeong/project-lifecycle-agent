@@ -135,6 +135,12 @@ def apply_patch(folder, payload, actor="agent"):
         if "expected_revision" not in payload or payload["expected_revision"] != actual:
             raise ValueError("진행 기록이 변경되었습니다. inspect 후 변경안을 다시 작성하세요.")
         changes, assigned = {}, {}
+        task_workspace = None
+        if "tasks" in payload:
+            from tools import workspace
+            task_workspace = workspace.read(root)
+            # Capture the previous name before next_action is edited or cleared.
+            workspace.preserve_task_titles(root, tables, task_workspace)
         if "project" in payload:
             patch = payload["project"]
             allowed = {"name", "objective", "scope_baseline", "client_or_product_owner", "project_manager", "technical", "tailoring", "methodology", "workflow"}
@@ -179,7 +185,7 @@ def apply_patch(folder, payload, actor="agent"):
                 fields = next(csv.reader(handle))
             assigned[name] = []
             for patch in payload[name]:
-                if not isinstance(patch, dict) or set(patch) - set(fields) or any(not isinstance(value, str) for value in patch.values()):
+                if not isinstance(patch, dict) or set(patch) - (set(fields) | ({"title"} if name == "tasks" else set())) or any(not isinstance(value, str) for value in patch.values()):
                     raise ValueError(f"{name}: 필드 이름과 문자열 값을 확인하세요.")
                 identifier = patch.get(key) or next_id(rows, key, prefix)
                 row = next((item for item in rows if item[key] == identifier), None)
@@ -189,15 +195,24 @@ def apply_patch(folder, payload, actor="agent"):
                     if "status" in fields:
                         row["status"] = {"requirements": "proposed", "tasks": "todo", "deliverables": "draft", "risks": "open"}[name]
                     rows.append(row)
+                    if name == "tasks" and workspace._meaningful_title(patch.get("title") or patch.get("next_action")):
+                        task_workspace["tasks"].setdefault(identifier, {})["title"] = workspace.redact_text(patch.get("title") or patch["next_action"])
+                if name == "tasks" and "title" in patch:
+                    if not workspace._meaningful_title(patch["title"]):
+                        raise ValueError("작업 제목은 비어 있거나 완료 안내일 수 없습니다.")
+                    task_workspace["tasks"].setdefault(identifier, {})["title"] = workspace.redact_text(patch["title"])
                 if name == "deliverables" and patch.get("status") == "approved":
                     raise ValueError("산출물 승인은 실제 검토 근거로 review에서 기록하세요.")
                 if name == "deliverables" and row["status"] == "approved" and any(row.get(field) != value for field, value in patch.items()):
                     row["status"] = "in_review"
-                row.update(patch)
+                row.update({field: value for field, value in patch.items() if field in fields})
                 row[key] = identifier
                 assigned[name].append(identifier)
             changes[f"registers/{name}.csv"] = table_bytes(root, name, rows)
         validate_tables(root, tables)
+        if task_workspace is not None:
+            workspace.preserve_task_titles(root, tables, task_workspace, historical={})
+            changes[workspace.STORE] = json_bytes(task_workspace)
         if "workflow" in data:
             workflow.validate(data["workflow"], data, tables)
         if any(key in payload for key in ("template_selection", "template_profiles", "template_checks")):

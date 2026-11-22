@@ -4,6 +4,7 @@ import {
   active,
   completed,
   labels,
+  commandsForTask,
   type Snapshot,
   type Task,
   type Selection,
@@ -68,10 +69,12 @@ const working = (
     snapshot.agents.some((a: any) => {
       const last = firstStamp(a.last_seen, a.last_activity_at);
       return (
-        ["running", "active", "working"].includes(a.status) &&
-        last !== null &&
-        now >= last &&
-        now - last < 90000 &&
+        !a.superseded &&
+        ["running", "active", "working", "preparing", "starting"].includes(
+          a.status,
+        ) &&
+        (Boolean(a.native_agent_id && a.session_id) ||
+          (last !== null && now >= last && now - last < 90000)) &&
         (a.task_id === task.id || (a.task_ids || []).includes(task.id))
       );
     })
@@ -100,11 +103,19 @@ export function buildRoleTimeline(
       lanes.set(role, lane);
     }
     lane.tasks.push(task);
+    const currentCommands = commandsForTask(task, snapshot);
+    const currentCommandIds = new Set(
+      currentCommands.map((command: any) => command.id),
+    );
     const taskEvents = events
-      .filter((e) => e.task_id === task.id)
+      .filter(
+        (e) =>
+          e.task_id === task.id &&
+          (!e.command_id || currentCommandIds.has(e.command_id)),
+      )
       .sort((a, b) => stamp(a.at)! - stamp(b.at)!);
-    const commands = (snapshot.commands || [])
-      .filter((c: any) => c.task_id === task.id && stamp(c.started_at) !== null)
+    const commands = currentCommands
+      .filter((c: any) => stamp(c.started_at) !== null)
       .sort((a: any, b: any) => stamp(a.started_at)! - stamp(b.started_at)!);
     const isLive = working(snapshot, task, now, mode, connected);
     if (commands.length) {
@@ -117,7 +128,9 @@ export function buildRoleTimeline(
         const live =
           isLive && c.status === "running" && index === commands.length - 1;
         const terminal = related.find((e) =>
-          ["completed", "failed"].includes(e.kind || ""),
+          ["completed", "failed", "agent_completed", "agent_failed"].includes(
+            e.kind || "",
+          ),
         );
         const closed = ["completed", "failed"].includes(c.status);
         const end = live
@@ -153,20 +166,28 @@ export function buildRoleTimeline(
       });
     } else {
       const reportedStart = firstStamp(
+        task.native_started_at,
         task.attempt_started_at,
         task.actual_start,
       );
-      const startEvent = taskEvents.find((e) => e.kind === "started");
+      const startEvent = taskEvents.find((e) =>
+        ["started", "agent_started", "delegation_bound"].includes(e.kind || ""),
+      );
       const start =
         reportedStart ?? firstStamp(startEvent?.at, taskEvents[0]?.at);
       if (start !== null) {
         const terminal = [...taskEvents]
           .reverse()
-          .find((e) => ["completed", "failed"].includes(e.kind || ""));
+          .find((e) =>
+            ["completed", "failed", "agent_completed", "agent_failed"].includes(
+              e.kind || "",
+            ),
+          );
         const end = isLive
           ? Math.max(start, now)
           : knownEnd(
               start,
+              task.native_finished_at,
               task.attempt_finished_at,
               !active(task) ? task.actual_end : null,
               terminal?.at,

@@ -1,0 +1,113 @@
+{
+  "description": "프로젝트이음 · 실제 호스트 실행 관측 (내용/명령 인자 수집 없음)",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "commandWindows": "python -I -X utf8 -c \"import os,runpy,sys;sys.argv=['native_hooks','--provider','codex'];runpy.run_path(os.path.join(os.environ['CLAUDE_PLUGIN_ROOT'],'tools','native_hooks.py'),run_name='__main__')\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

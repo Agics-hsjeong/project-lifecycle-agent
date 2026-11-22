@@ -20,6 +20,12 @@ ZIP은 공개 가능한 파일만 허용 목록으로 선택합니다. 저장소
 
 manifest 구조 검사와 로컬 도구 테스트는 실제 호스트 설치 시험을 대신하지 않습니다. 릴리스 전 두 호스트에서 설치·활성화·RFP 입력·작업 이어하기를 확인합니다.
 
+## 관제 변경의 검증 기준
+
+`test_workspace_scope_titles.py`는 현재 범위·독립 실행·최신 실패/무효화·제목 보존·재연결 원자성을, `test_native_observation.py`는 세션별 실제 ID·위임 순서·중복 수신·모호한 연결·결과 확인 대기와 민감 원문 거부를 검사합니다. 시작/종료 이벤트를 검증 완료나 사람 승인으로 바꾸지 마세요. 과거 실패를 삭제하거나 최신 유효 실행만 선택해서 완료율을 올리지 않습니다.
+
+실제 호스트 검증은 사용자 설치본·실제 worker ID와 이벤트·관제 snapshot을 대조합니다. 테스트용 연결이나 재생 결과를 현재 호스트 E2E 성공이라고 보고하지 않습니다. 고객 원본은 읽기 전용으로 확인하고 합성 프로젝트에서 새 실행을 검증합니다. 공개 기록에는 세션 토큰·원시 프롬프트·추론을 포함하지 않습니다.
+
 ## 문서 사이트
 
-웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.5/website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.
+웹 소개·가이드 소스와 빌드·링크 검사는 [website/README.md](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.6/website/README.md)를 참고하세요. 공개용 가상 예제는 examples/customer-portal/에만 작성합니다. 실제 고객의 RFP·제안·참고 원본을 예제로 복사하지 않습니다. 로고·PDF·웹 의존성과 사이트 workflow는 Python 플러그인 ZIP에 포함하지 않습니다.

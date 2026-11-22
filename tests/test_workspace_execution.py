@@ -52,6 +52,27 @@ class ExecutionMetadataTests(unittest.TestCase):
         return workspace.runner_event(self.root, {"expected_revision": self.rev(), "runner_id": "RUNNER-fixture", "provider": "codex",
             "pid": os.getpid(), "status": status, **fields})
 
+    def test_supervisor_reports_project_lock_wait_then_actual_start(self):
+        import threading
+        from types import SimpleNamespace
+        from tools import workspace_server
+        server = SimpleNamespace(project=self.root, supervisor_lock=threading.Lock(), supervisor_state={})
+        received = []
+        options = {"job_timeout": 12}
+        def worker(project, provider, stop_event, provider_options):
+            callback = provider_options["on_startup_wait"]
+            callback({"status": "starting", "reason": "project_busy"})
+            received.append(dict(server.supervisor_state))
+            callback({"status": "running", "reason": "ready"})
+            received.append(dict(server.supervisor_state))
+        workspace_server._supervise(server, "codex", worker, threading.Event(), options)
+        self.assertEqual(received[0]["status"], "starting")
+        self.assertEqual(received[0]["last_error"], "프로젝트 기록 작업을 기다립니다.")
+        self.assertEqual(received[1]["status"], "running")
+        self.assertIsNone(received[1]["last_error"])
+        self.assertEqual(server.supervisor_state["status"], "stopped")
+        self.assertEqual(options, {"job_timeout": 12})
+
     def test_execution_plan_is_explicit_and_exported_without_csv_rewrite(self):
         csv_before = (self.root / "registers/tasks.csv").read_bytes()
         plan = self.plan()
@@ -157,7 +178,8 @@ class ExecutionMetadataTests(unittest.TestCase):
         with patch.dict(sys.modules, {"tools.workspace_runner": module}), patch.object(workspace_server, "make_server", return_value=fake), contextlib.redirect_stdout(io.StringIO()):
             workspace_server.serve(self.root, provider="codex", runner_options={"timeout": 30})
         self.assertEqual(observed["provider"], "codex")
-        self.assertEqual(observed["options"], {"timeout": 30})
+        self.assertEqual({key: value for key, value in observed["options"].items() if key != "on_startup_wait"}, {"timeout": 30})
+        self.assertTrue(callable(observed["options"]["on_startup_wait"]))
         self.assertTrue(observed["stopped"])
 
 

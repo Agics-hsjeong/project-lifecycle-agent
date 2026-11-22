@@ -54,7 +54,8 @@ def _snapshot_with_supervisor(server, value):
     # local server health, not a project event or a fabricated agent heartbeat.
     with server.supervisor_lock:
         health = dict(server.supervisor_state)
-    return {**value, "host": {**value.get("host", {}), "supervisor": health}}
+    return {**value, "host": {**value.get("host", {}), "supervisor": health,
+        "native_monitor": dict(getattr(server, "native_monitor", {"status": "disabled"}))}}
 
 
 def _supervise(server, provider, runner_function, stop_event, options, retry_errors=(), retry_delays=(0.2, 0.4, 0.8, 1.6, 3.2)):
@@ -69,8 +70,15 @@ def _supervise(server, provider, runner_function, stop_event, options, retry_err
             return
         _set_supervisor(server, status="running", attempts=attempt + 1,
                         last_error=None, next_retry_seconds=None)
+        def startup_state(payload):
+            if not isinstance(payload, dict) or payload.get("status") not in {"starting", "running"}:
+                return
+            waiting = payload["status"] == "starting"
+            _set_supervisor(server, status=payload["status"],
+                last_error="프로젝트 기록 작업을 기다립니다." if waiting else None, next_retry_seconds=None)
         try:
-            runner_function(server.project, provider, stop_event=stop_event, provider_options=options)
+            runner_function(server.project, provider, stop_event=stop_event,
+                provider_options={**options, "on_startup_wait": startup_state})
         except Exception as exc:
             summary = workspace.public_summary(str(exc) or type(exc).__name__)
             if isinstance(exc, retry_errors) and attempt < len(retry_delays):
@@ -294,6 +302,11 @@ def serve(folder, port=0, assets=None, open_browser=False, provider=None, runner
             args=(server, provider, runner_function, stop_event, runner_options, retry_errors),
             name="ieum-workspace-runner", daemon=True)
         runner_thread.start()
+    from tools.native_bridge import monitor
+    server.native_monitor = {"status": "starting", "last_error": None}
+    observer_thread = threading.Thread(target=monitor, args=(getattr(server, "project", Path(folder).resolve()), stop_event, server.native_monitor),
+        name="ieum-native-observer", daemon=True)
+    observer_thread.start()
     runtime = tempfile.TemporaryDirectory(prefix="ieum-workspace-")
     os.chmod(runtime.name, 0o700)
     credential = Path(runtime.name) / "host-session.json"
@@ -313,6 +326,7 @@ def serve(folder, port=0, assets=None, open_browser=False, provider=None, runner
         stop_event.set()
         if runner_thread:
             runner_thread.join(timeout=20)
+        observer_thread.join(timeout=3)
         server.server_close()
         runtime.cleanup()
 

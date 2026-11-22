@@ -6,7 +6,7 @@
 2. workspace-snapshot으로 실제 TASK/RUN·역할·산출물·활동·연결을 확인한다. 원장이 비어 있으면 가짜 작업자를 만들지 않는다.
 3. 필요한 작업·선후 관계·역할·일정은 workspace-configure로 기록한다. 같은 역할이라는 이유로 TASK와 RUN을 추정 결합하지 않는다. 새 내부 작업마다 사람 게이트를 생성하지 않는다.
 4. 검증된 tools/workspace_ui/manifest.json을 확인하고 workspace-serve <project> --open으로 관찰 서버를 유지한다. 사용자에게 Node 설치나 UI 빌드를 넘기지 않는다. Windows background helper는 Hidden을 사용한다.
-5. 현재 호스트의 실제 역할 작업과 인계·검증은 workspace-activity로 전달한다. 상태·근거는 기존 엔진으로 직렬 기록한다. 별도 상주 처리를 요청한 경우 provider와 작업 execution 계획을 연결한다. 같은 TASK를 중복 실행하지 않는다.
+5. 현재 호스트의 실제 역할 작업은 OBSERVATION의 focus/delegate 연결과 공식 훅·현재 세션 관측기로 자동 전달한다. 인계·검토 요약만 workspace-activity로 남기고 상태·검증 근거는 기존 엔진으로 직렬 기록한다. 별도 상주 처리를 요청한 경우 provider와 작업 execution 계획을 연결한다. 같은 TASK를 중복 실행하지 않는다.
 6. UI의 프로젝트 ID·마지막 갱신·현재 행동·실제 활성 작업자를 확인한다. 접속 토큰을 공개 로그·HANDOFF·산출물에 넣지 않는다. 연결 실패를 demo로 바꾸지 않는다.
 
 ## 기존 게이트와 자동 검토
@@ -20,3 +20,7 @@
 workspace-host의 heartbeat/claim/started/completed/failed/retry는 실제 작업자와 명시 실행 계획의 연결을 유지한다. RUN/STEP 결과는 기존 run-result로 검증한다. 상주 실행기와 현재 호스트가 같은 작업을 동시에 수신하지 않는다. host capability와 viewer capability를 분리한다. 브라우저 조회로 임의 셸이나 실행 파일을 등록하지 않는다.
 
 실제 실행·미집계·실패·미실행 범위를 구분한다. 합성 테스트와 native 모델 E2E를 구분하고 실제 확인한 증거만 완료 보고한다.
+
+## 현재 실행과 과거 이력
+
+기본 화면의 완료율은 current_scope의 작업만 집계한다. 최근 실행이 실패·stale여도 숨기지 않는다. 실행 이력에서 이전 RUN·분리된 TASK·실패·무효 근거를 확인한다. TASK 제목과 다음 행동 메모는 별개다. 실제 ID와 표시 이름을 구분하고, 작업자 종료 후 결과가 아직 확인되지 않은 상태를 완료로 표시하지 않는다.

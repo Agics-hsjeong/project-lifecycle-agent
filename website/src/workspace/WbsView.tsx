@@ -3,8 +3,10 @@ import {
   PHASES,
   ROLE,
   active,
+  executionLabel,
   completed,
   labels,
+  commandsForTask,
   phaseOf,
   type Selection,
   type Snapshot,
@@ -208,10 +210,7 @@ export function Wbs({
       : [];
   });
   const lastCommands = new Map(
-    tasks.map((t) => [
-      t.id,
-      (snapshot.commands || []).filter((c: any) => c.task_id === t.id).at(-1),
-    ]),
+    tasks.map((t) => [t.id, commandsForTask(t, snapshot).at(-1)]),
   );
   return (
     <section
@@ -321,21 +320,23 @@ export function Wbs({
                   (task.status === "blocked" && latest?.status === "failed")),
               );
               const status = task
-                ? failed
-                  ? "실패"
-                  : active(task)
-                    ? "진행 중"
-                    : completed(task)
-                      ? task.status === "skipped"
-                        ? "적용 제외"
-                        : "완료"
-                      : ["awaiting_approval", "awaiting_decision"].includes(
-                            task.status,
-                          )
-                        ? "판단 대기"
-                        : task.status === "stale"
-                          ? "재검토"
-                          : "대기"
+                ? executionLabel(task) ||
+                  (task.status === "skipped" ? "적용 제외" : null) ||
+                  (failed
+                    ? "실패"
+                    : active(task)
+                      ? "진행 중"
+                      : completed(task)
+                        ? task.status === "skipped"
+                          ? "적용 제외"
+                          : "완료"
+                        : ["awaiting_approval", "awaiting_decision"].includes(
+                              task.status,
+                            )
+                          ? "판단 대기"
+                          : task.status === "stale"
+                            ? "재검토"
+                            : "대기")
                 : "";
               const warning = task
                 ? task.waiting_reason ||

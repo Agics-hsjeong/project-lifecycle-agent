@@ -4,17 +4,25 @@
 
 **[소개·사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/) · [처음 시작하기](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/start/) · [공개 예제](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/examples/portal/) · [사용자 매뉴얼 PDF](https://agics-hsjeong.github.io/project-lifecycle-agent/downloads/project-ieum-user-guide.pdf)**
 
-표시 브랜드는 **프로젝트이음(Project Ieum)**입니다. 설치 ID는 기존 `project-lifecycle-agent`, marketplace는 `project-lifecycle-marketplace`, 기존 스킬 호출 `project-lifecycle`은 계속 지원합니다. 쉬운 이음 호출과 자동 역할 실행은 아래 beta.5 안내를 확인하세요.
+표시 브랜드는 **프로젝트이음(Project Ieum)**입니다. 설치 ID는 기존 `project-lifecycle-agent`, marketplace는 `project-lifecycle-marketplace`, 기존 스킬 호출 `project-lifecycle`은 계속 지원합니다. 쉬운 이음 호출과 자동 역할 실행은 아래 beta.6 안내를 확인하세요.
 
 **제안요청서와 예전 제안서·발표자료를 전달하면, Codex와 Claude Code가 제안 작성부터 프로젝트 운영까지 돕는 오픈소스 플러그인입니다.** 외주/SI와 자체 서비스 프로젝트에 사용할 수 있습니다.
 
 사용자는 업무 자료·목표·사업 결정을 전달합니다. 에이전트는 폴더 생성, 원본 등록, 분석, 산출물 제작, 검수와 진행 기록을 처리합니다. 일상적으로 PowerShell 명령을 입력하거나 JSON·CSV를 편집할 필요는 없습니다.
 
-현재 베타 버전: **2.0.0-beta.5** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
+현재 베타 버전: **2.0.0-beta.6** · 라이선스: [MIT](LICENSE) · [GitHub 저장소](https://github.com/Agics-hsjeong/project-lifecycle-agent)
 
 v2 베타 버전입니다. SI·제품·API·유지보수 프로필, 릴리스 범위, 실행·중단·재개, 변경 복원, 제안 출력 검수와 로컬 현황을 제공합니다. 기존 프로젝트는 **“설치 버전을 확인하고, 이 프로젝트의 v2 이행 미리보기를 확인한 뒤 백업하고 적용해줘”**라고 요청하세요. 관리 버전만 갱신하며 기존 문서·ID·단계를 새 기본형으로 덮어쓰지 않습니다.
 
-**베타 버전이므로 기존 안정판과 구분해 사용하세요.** 재현 가능한 설치에는 공개된 릴리스 태그를 지정하고, 기존 설치는 실제 로딩 버전을 확인한 뒤 업데이트하세요. 이전 버전은 [v2.0.0-beta.1 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.1)에서 확인할 수 있습니다. [beta.5 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.5) · [실제 호스트 검증](docs/HOST-VALIDATION.md) · [v2 사용·이행 안내](docs/V2-IMPLEMENTATION.md) · [검증 기록](docs/VALIDATION.md)
+**베타 버전이므로 기존 안정판과 구분해 사용하세요.** 재현 가능한 설치에는 공개된 릴리스 태그를 지정하고, 기존 설치는 실제 로딩 버전을 확인한 뒤 업데이트하세요. 이전 버전은 [v2.0.0-beta.1 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.1)에서 확인할 수 있습니다. [beta.6 릴리스](https://github.com/Agics-hsjeong/project-lifecycle-agent/releases/tag/v2.0.0-beta.6) · [실제 호스트 검증](docs/HOST-VALIDATION.md) · [v2 사용·이행 안내](docs/V2-IMPLEMENTATION.md) · [검증 기록](docs/VALIDATION.md)
+
+## 실제 실행과 기록을 잇는 관제 — 2.0.0-beta.6
+
+호스트의 시작·종료 이벤트와 실제 작업자 ID를 연결합니다. 역할 이름만 같다는 이유로 작업을 추정하지 않고, 프로젝트·세션·위임 연결에 맞는 실행만 표시합니다. 호스트에서 실행이 끝났다는 사실은 산출물 검증 성공이 아닙니다. 원장 근거가 확인되기 전에는 **결과 확인 중**으로 표시하며 기존 실패·변경됨 상태를 지우지 않습니다.
+
+진척도는 **최근 실행**과 **전체 기록**을 구분합니다. 이전 실패나 오래된 증거를 최신 실행의 분모에 섞지 않으며, 최신 실행이 실패했거나 무효화됐다고 과거 성공 실행을 대신 선택하지 않습니다. 같은 작업의 재실행 이력과 독립 실행 범위는 남겨 둡니다. 작업 제목은 다음 행동·완료 메모와 분리해 보존하고, 구형 기록은 연결된 단계와 최초 작업 기록으로 복원합니다.
+
+기존 사용자는 **“프로젝트이음을 최신 버전으로 업데이트하고, 새 세션에서 실제 로딩 버전과 이 프로젝트의 관제 연결을 확인해줘”**라고 요청하세요. 호스트가 변경된 훅의 신뢰 확인을 요구하면 내용을 검토하고 해당 제품 화면에서 허용해야 합니다. 숨은 추론·원시 프롬프트·자격 증명은 관제 데이터로 수집하지 않습니다. [관제 사용법](docs/WORKSPACE.md) · [연결·데이터 계약](docs/AUTOMATIC-EXECUTION.md)
 
 ## 검증·보호·관제 개선 — 2.0.0-beta.5
 
@@ -22,7 +30,7 @@ v2 베타 버전입니다. SI·제품·API·유지보수 프로필, 릴리스 �
 
 사용자는 **“이음, 이 프로젝트를 이어서 진행하고 실제 작업과 검증 결과를 관제에 보여줘”**라고 요청하면 됩니다. 에이전트가 준비·역할 실행·기록을 처리합니다. 이 변경은 beta.5부터 포함됩니다. 기존 설치는 marketplace를 갱신하고 플러그인 업데이트 후 새 대화에서 로딩 버전을 확인하세요. [자동 실행·검증·운영 상세](docs/AUTOMATIC-EXECUTION.md)와 [수정·검증 기록](docs/QUALITY-IMPROVEMENTS.md)을 확인하세요.
 
-## 이음 명령과 자동 역할 실행 — 2.0.0-beta.5
+## 이음 명령과 자동 역할 실행 — 2.0.0-beta.6
 
 “**이음 시작해줘 / 이음 기획해줘 / 이음 제안해줘 / 이음 검토해줘 / 이음 이어서 해줘**”처럼 요청할 수 있는 진입 스킬과 **18개 역할 계약**을 추가했습니다. 새 소스를 로딩한 Codex는 `$ieum`, Claude Code는 프로젝트별 별칭 설정 후 **`/ieum`**으로 호출합니다. 별칭 준비는 “프로젝트이음으로 시작하고 짧은 명령도 준비해줘”라고 자연어로 요청합니다. 긴 플러그인 호출은 진단용으로 유지합니다. 기존 호출과 설치 ID는 유지합니다.
 
@@ -39,7 +47,7 @@ Claude Code는 플러그인의 네이티브 역할 파일을 사용하고, Codex
 
 **beta.2 기능이며 이전 `v2.0.0-beta.1` 릴리스에는 포함되지 않습니다.** 실제 설치된 버전과 호스트 역할 로딩을 확인하세요. 실제 호스트 검증·배포 범위는 검증 기록에서 확인할 수 있습니다. [사용법·연결 방식·검증 범위](docs/ROLE-AGENTS.md) · [웹 사용 가이드](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/guides/agents/)
 
-## 관제 워크스페이스 — 2.0.0-beta.5
+## 관제 워크스페이스 — 2.0.0-beta.6
 
 beta.5 자동 실행기는 작업 준비 오류·고아 수신 복구, 전체 프로세스 종료, 입력 전송 중 취소·제한 시간을 처리합니다. 독립 검증은 로컬 Codex sandbox CLI의 OS 격리 안에서 실행하며 모델 API를 호출하지 않습니다. Windows는 MXC를 요구하고, 사용할 수 없으면 검증을 실패로 표시합니다. 원본·사용자 홈·사본 밖 쓰기와 네트워크를 허용하는 비격리 대체 실행은 없습니다. 별도 CLI 실행기를 Claude로 사용해도 검증용 sandbox CLI가 필요합니다. Linux는 기본 차단에 검증 사본·공개 런타임만 허용하며, 실행이 끝나면 하위 프로세스까지 종료한 뒤 상태를 기록합니다.
 
@@ -54,9 +62,9 @@ B안의 밝은 작업 영역과 짙은 사이드바를 적용했습니다. 상�
 역할별 현재 작업과 진행 상황을 관제에서 보여줘.
 ```
 
-사용자는 기존 Codex·Claude Code 대화에서 목표·질문·수정 방향과 필요한 판단을 전달합니다. 기본은 현재 native 호스트의 작업 보고이고 별도 처리가 필요하면 로컬 CLI 실행기를 연결합니다. 실제 전달받은 활동만 표시하며 작업 완료 비율·경과 시간·검증 결과를 구분합니다. 기록되지 않은 다른 채팅이나 숨은 추론을 자동 수집하지 않습니다.
+사용자는 기존 Codex·Claude Code 대화에서 목표·질문·수정 방향과 필요한 판단을 전달합니다. 기본은 현재 native 호스트의 관측 이벤트와 작업 연결이고 별도 처리가 필요하면 로컬 CLI 실행기를 연결합니다. 실제 전달받은 활동만 표시하며 작업 완료 비율·경과 시간·검증 결과를 구분합니다. 기록되지 않은 다른 채팅이나 숨은 추론을 자동 수집하지 않습니다.
 
-고객 자료는 공개 데모에 업로드하지 않습니다. 기존 결정 이력은 보존하고 AI 검토와 사람의 사업 승인·외부 실행 권한을 구분합니다. 이 기능은 **beta.5에 포함**됩니다. 기존 beta.2 사용자는 플러그인을 업데이트하고 새 세션에서 실제 로딩 버전을 확인하세요. 기존 고객 프로젝트는 자동으로 교체하지 않습니다.
+고객 자료는 공개 데모에 업로드하지 않습니다. 기존 결정 이력은 보존하고 AI 검토와 사람의 사업 승인·외부 실행 권한을 구분합니다. 이 기능은 **beta.5에 포함**됩니다. 기존 사용자는 플러그인을 업데이트하고 새 세션에서 실제 로딩 버전과 훅 연결을 확인하세요. 기존 고객 프로젝트는 자동으로 교체하지 않습니다.
 
 [관제 사용법](docs/WORKSPACE.md) · [호스트 연결·자동 검토](docs/AUTOMATIC-EXECUTION.md) · [검증 기록](docs/WORKSPACE-OBSERVATION-VALIDATION.md)
 
@@ -303,14 +311,14 @@ Project Lifecycle Agent의 설치 소스와 버전을 확인하고 최신 main�
 
 ## 실행·데이터 범위
 
-- beta.5는 활성 호스트 세션의 스킬·도구·양식에 더해 실제 활동 보고·관제와 선택적인 네이티브 CLI 상주 실행기를 제공합니다. [자동 실행 사용법과 범위](docs/AUTOMATIC-EXECUTION.md)를 확인하세요.
+- beta.6은 활성 호스트의 실제 실행 이벤트·작업자 ID와 원장 검증을 구분하는 관제, 현재 실행·전체 이력과 선택적인 네이티브 CLI 상주 실행기를 제공합니다. [자동 실행 사용법과 범위](docs/AUTOMATIC-EXECUTION.md)를 확인하세요.
 - 고객 프로젝트와 참고 원본은 플러그인 코드와 분리합니다. 이 저장소의 `projects/`, `reference-templates/`, `.test-output/`의 자료는 Git 추적·공개 패키징에서 제외합니다. 사용자의 별도 저장소는 공개 전에 제외 설정을 확인해야 합니다.
 - 원본 분석 결과는 프로젝트 파일에 저장합니다. 이를 모델 자체에 학습시키는 기능은 없습니다. 자료가 호스트 모델에 전달되는 방식은 사용하는 제품의 데이터 정책과 설정을 따릅니다.
 - 기존 고객 프로젝트를 새 기본형으로 통째로 덮어쓰지 않습니다. 적용 차이·범위·이행 방법을 기록하고 필요한 항목을 보존하며 추가합니다.
 
 ## 상세 문서와 개발자 안내
 
-웹사이트 소스는 [website/](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.5/website/README.md)에 있으며 Astro·Starlight로 구성합니다. 소개 페이지에서 실행 아키텍처, 가상 고객 포털 목표 시스템, 사업 유형별 흐름과 템플릿·설치 요청을 확인할 수 있습니다. [SVG 도식 원본과 생성 방법](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.5/website/public/diagrams/README.md)도 공개합니다. [설치부터 내 제안서까지](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/quickstart/)에서 AI 설치·RFP·자기 템플릿·제안서 제작·결과 받기를 순서대로 따라갈 수 있습니다. 랜딩과 문서·가이드는 공통 브랜드·스타일을 사용하며, 단계 탐색과 조건별 첫 요청문 생성기를 제공합니다. 생성된 요청문은 설치한 AI 세션에서 사용합니다. 화면 수정 시 [디자인·접근성 기준](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.5/website/DESIGN.md)을 참고하세요. GitHub Actions에서 사이트 빌드·내부 링크를 검사하고 GitHub Pages로 배포합니다. 웹 의존성과 다운로드 자료는 기존 Python 플러그인 패키지와 분리합니다. 사이트는 소개·가이드·공개 예제를 제공하며 실제 고객 자료 처리는 사용자의 Codex·Claude Code에서 수행합니다.
+웹사이트 소스는 [website/](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.6/website/README.md)에 있으며 Astro·Starlight로 구성합니다. 소개 페이지에서 실행 아키텍처, 가상 고객 포털 목표 시스템, 사업 유형별 흐름과 템플릿·설치 요청을 확인할 수 있습니다. [SVG 도식 원본과 생성 방법](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.6/website/public/diagrams/README.md)도 공개합니다. [설치부터 내 제안서까지](https://agics-hsjeong.github.io/project-lifecycle-agent/docs/quickstart/)에서 AI 설치·RFP·자기 템플릿·제안서 제작·결과 받기를 순서대로 따라갈 수 있습니다. 랜딩과 문서·가이드는 공통 브랜드·스타일을 사용하며, 단계 탐색과 조건별 첫 요청문 생성기를 제공합니다. 생성된 요청문은 설치한 AI 세션에서 사용합니다. 화면 수정 시 [디자인·접근성 기준](https://github.com/Agics-hsjeong/project-lifecycle-agent/blob/v2.0.0-beta.6/website/DESIGN.md)을 참고하세요. GitHub Actions에서 사이트 빌드·내부 링크를 검사하고 GitHub Pages로 배포합니다. 웹 의존성과 다운로드 자료는 기존 Python 플러그인 패키지와 분리합니다. 사이트는 소개·가이드·공개 예제를 제공하며 실제 고객 자료 처리는 사용자의 Codex·Claude Code에서 수행합니다.
 
 | 문서 | 내용 |
 | --- | --- |

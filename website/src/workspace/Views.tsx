@@ -24,6 +24,7 @@ import {
   completed,
   awaiting,
   active,
+  executionLabel,
   type Task,
   type Snapshot,
   type Selection,
@@ -37,9 +38,14 @@ const PHASE_GAP = 324;
 const ROW_GAP = 184;
 function TaskNode({ data, selected }: NodeProps) {
   const t = data.task as Task;
+  const runtimeLabel = executionLabel(t);
+  const visualStatus =
+    runtimeLabel && !active(t) && ["doing", "running"].includes(t.status)
+      ? "todo"
+      : t.status;
   return (
     <div
-      className={`flow-card ${selected ? "is-selected" : ""} task-${t.status}`}
+      className={`flow-card ${selected ? "is-selected" : ""} task-${visualStatus}`}
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
@@ -55,7 +61,7 @@ function TaskNode({ data, selected }: NodeProps) {
       <div className="flow-card-top">
         <span className="mono">{t.id}</span>
         <span
-          className={`flow-state-dot state-${t.status}`}
+          className={`flow-state-dot state-${visualStatus}`}
           aria-hidden="true"
         />
       </div>
@@ -65,8 +71,11 @@ function TaskNode({ data, selected }: NodeProps) {
         {ROLE[t.role] || t.role || "담당 미정"}
       </div>
       <footer>
-        <span className={`flow-status status-text-${t.status}`}>
-          {labels[t.status] || t.status}
+        <span
+          className={`flow-status status-text-${visualStatus}`}
+          title={runtimeLabel || labels[t.status] || t.status}
+        >
+          {runtimeLabel || labels[t.status] || t.status}
         </span>
         <span>
           {t.depends_on.length ? `선행 ${t.depends_on.length}` : "시작 작업"}
@@ -304,7 +313,7 @@ function WorkflowInner({
       initialWidth: CARD_WIDTH,
       initialHeight: CARD_HEIGHT,
       selected: selection?.id === t.id,
-      ariaLabel: `${t.id} ${t.title} ${ROLE[t.role] || t.role || "담당 미정"} ${labels[t.status] || t.status} ${t.depends_on.length ? `선행 ${t.depends_on.length}` : "시작 작업"}`,
+      ariaLabel: `${t.id} ${t.title} ${ROLE[t.role] || t.role || "담당 미정"} ${executionLabel(t) || labels[t.status] || t.status} ${t.depends_on.length ? `선행 ${t.depends_on.length}` : "시작 작업"}`,
     })),
   ];
   const edges: any[] = tasks.flatMap((t) =>
@@ -482,7 +491,7 @@ export function TaskList({
             <strong>{t.title}</strong>
             <small>{ROLE[t.role] || t.role}</small>
           </span>
-          <StatusBadge status={t.status} />
+          <StatusBadge status={t.status} task={t} />
           <Icon name="chevron" size={16} />
         </button>
       ))}
@@ -622,6 +631,7 @@ export function KnowledgeMap({
         });
     if (showAgents)
       snapshot.agents
+        .filter((a) => !a.superseded)
         .filter(
           (a) =>
             (a.task_id && visible.some((t) => t.id === a.task_id)) ||
@@ -642,12 +652,12 @@ export function KnowledgeMap({
           add(
             a.id,
             "agent",
-            `${role}\n${provider} · ${String(a.id)
+            `${role}\n${provider} · ${String(a.native_agent_id || a.id)
               .replace(/^(?:agent:)?runner:/i, "")
               .replace(/^RUNNER-/i, "")
               .slice(0, 6)}`,
             "",
-            `${role} · ${provider} · ${a.id}`,
+            `${role} · ${provider} · ${a.native_agent_id || a.id}${a.session_id ? ` · 세션 ${a.session_id}` : ""}`,
           );
           if (a.task_id) edge(a.id, a.task_id, "assigned_to");
         });

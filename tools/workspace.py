@@ -29,6 +29,7 @@ PHASES = [
 ]
 MAX_FILE = 2 * 1024 * 1024
 _HASH_SCOPE = ContextVar('workspace_snapshot_hashes', default=None)
+_TITLE_SCOPE = ContextVar('workspace_snapshot_titles', default=None)
 
 
 def snapshot_hash_scope(function):
@@ -40,10 +41,12 @@ def snapshot_hash_scope(function):
     @wraps(function)
     def scoped(*args, **kwargs):
         token = _HASH_SCOPE.set({})
+        title_token = _TITLE_SCOPE.set({})
         try:
             return function(*args, **kwargs)
         finally:
             _HASH_SCOPE.reset(token)
+            _TITLE_SCOPE.reset(title_token)
     return scoped
 
 
@@ -57,7 +60,7 @@ def read(root):
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("관제 메타데이터 형식이 잘못되었습니다.")
     for field, default in (("tasks", {}), ("gates", []), ("decisions", []), ("actions", {}),
-                           ("agents", {}), ("queue", []), ("baselines", {}), ("feedback", []), ("usage", []), ("superseded_steps", {}), ("reviews", []), ("policy", {"view_mode": "observer", "auto_run": False})):
+                           ("agents", {}), ("queue", []), ("baselines", {}), ("feedback", []), ("usage", []), ("superseded_steps", {}), ("reviews", []), ("execution_scopes", []), ("policy", {"view_mode": "observer", "auto_run": False})):
         value.setdefault(field, default)
     return value
 
@@ -407,13 +410,13 @@ def enrich_activity(root, result):
     result["activity_seq"] = recorded["seq"]
     now = datetime.now(timezone.utc)
     for task in result["tasks"]:
-        activity = [e for e in events if e.get("task_id") == task["id"]]
+        activity = [e for e in events if e.get("task_id") == task["id"] and activity_matches_task(e, task, result["commands"])]
         task["activity"] = activity[-30:]
         task["latest_activity"] = activity[-1] if activity else None
         task["latest_action"] = activity[-1]["summary"] if activity else None
         task["last_activity_at"] = activity[-1]["at"] if activity else None
         task["observed_status"] = activity[-1].get("status") if activity else None
-        commands = [c for c in result["commands"] if c["task_id"] == task["id"] and c.get("started_at")]
+        commands = [c for c in result["commands"] if c["task_id"] == task["id"] and c.get("started_at") and command_matches_task(c, task)]
         current = commands[-1] if commands else {}
         task["attempt_started_at"] = current.get("started_at")
         task["attempt_finished_at"] = current.get("completed_at") if current.get("status") == "completed" else None
@@ -445,6 +448,16 @@ def enrich_activity(root, result):
                                   "task_id": event.get("task_id"), "last_seen": event["at"], "status": status if age <= 90 else "disconnected",
                                   "source": event.get("source", "host_report"), "observed": True}
         agent = agents[identifier]
+        current_task = next((task for task in result["tasks"] if task["id"] == event.get("task_id")), None)
+        if current_task is not None:
+            old_event = not activity_matches_task(event, current_task, result["commands"])
+            current_command = any(c.get("agent_id") == identifier and c["task_id"] == current_task["id"]
+                                  and c["status"] in {"claimed", "running"} and command_matches_task(c, current_task)
+                                  for c in result["commands"])
+            agent["superseded"] = old_event and not current_command
+            if old_event and current_command:
+                # A fresh host claim/start is stronger evidence than its old log.
+                continue
         agent.update(current_action=event["summary"], last_activity_at=event["at"], latest_activity=event)
         for key in ("parent_id", "pid", "peer_role"):
             if key in event:
@@ -629,12 +642,107 @@ def phase(stage):
     return next((p["id"] for p in PHASES if stage in p["stages"]), "01")
 
 
+def _meaningful_title(value):
+    return (isinstance(value, str) and bool(value.strip()) and
+            value.strip().casefold().rstrip(".!。") not in
+            {"없음", "완료", "종료", "대기", "none", "n/a", "na", "null", "done", "-", "해당 없음"})
+
+
+def legacy_task_titles(root):
+    """Recover earliest pre-completion names from managed before-images, read only.
+
+    The historical next_action is usable only before completion. A closing note
+    is never treated as a title. Customer files are not migrated on GET.
+    """
+    import csv
+    import io
+    memo = _TITLE_SCOPE.get()
+    cache_key = str(root)
+    if memo is not None and cache_key in memo:
+        return memo[cache_key]
+    titles = {}
+    for event in lifecycle.events(root):
+        path = confined(root, "state/history/" + event["revision"] + ".json")
+        if not path.is_file():
+            continue
+        try:
+            history = json.loads(path.read_text(encoding="utf-8"))
+            for entry in history.get("entries", []):
+                if entry.get("path") != "registers/tasks.csv" or not entry.get("before"):
+                    continue
+                raw = base64.b64decode(entry["before"], validate=True).decode("utf-8-sig")
+                for row in csv.DictReader(io.StringIO(raw)):
+                    title = row.get("next_action", "")
+                    if row.get("status") != "done" and _meaningful_title(title):
+                        titles.setdefault(row["task_id"], redact_text(title.strip()))
+        except (ValueError, KeyError, UnicodeError):
+            # Missing/legacy history cannot manufacture a task name.
+            continue
+    if memo is not None:
+        memo[cache_key] = titles
+    return titles
+
+
+def preserve_task_titles(root, tables, store, *, historical=None):
+    """Populate only absent titles; caller commits these with the task mutation.
+
+    Runtime hooks may use this helper inside their existing storage lock and
+    transaction. Explicit workspace titles are always authoritative.
+    """
+    if all(_meaningful_title(store["tasks"].get(row["task_id"], {}).get("title")) for row in tables["tasks"]):
+        return False
+    historical = legacy_task_titles(root) if historical is None else historical
+    run_store = runs.read(root)
+    changed = False
+    for row in tables["tasks"]:
+        identifier = row["task_id"]
+        meta = store["tasks"].setdefault(identifier, {})
+        if _meaningful_title(meta.get("title")):
+            continue
+        ref = meta.get("step_ref") or {}
+        bound = next((step["title"] for run in run_store["runs"] if run["id"] == ref.get("run_id")
+                      for step in run["steps"] if step["id"] == ref.get("step_id")), None)
+        title = bound or historical.get(identifier)
+        if not title and row.get("status") != "done" and _meaningful_title(row.get("next_action")):
+            title = row["next_action"].strip()
+        named = title is not None
+        meta["title"] = redact_text(title or ((row.get("role") or "프로젝트") + " 작업 · " + identifier))
+        meta["title_source"] = "run_step" if bound else "history" if identifier in historical else "task_creation" if named else "fallback"
+        changed = True
+    return changed
+
+
+def _task_scope(root, data, store, tasks):
+    """An explicit focus or latest declared run; validity never chooses scope."""
+    selected = store.get("current_scope")
+    if selected:
+        return {**selected, "task_ids": [i for i in selected["task_ids"] if i in tasks],
+                "source": "explicit", "label": "선택한 실행 범위"}
+    run_store = runs.read(root)
+    if run_store["runs"]:
+        latest = run_store["runs"][-1]
+        declared = next((scope for scope in reversed(store["execution_scopes"]) if scope.get("run_id") == latest["id"]), {})
+        return {"id": declared.get("id", latest["id"]), "run_id": latest["id"], "title": declared.get("title", latest["title"]), "label": "최근 실행", "source": "latest_run",
+                "task_ids": [t["id"] for t in tasks.values() if t.get("run_id") == latest["id"]]}
+    return {"id": data["project_id"], "title": data["name"], "label": "전체 프로젝트", "source": "project",
+            "task_ids": list(tasks)}
+
+
 def task_records(root, data, tables, store, *, run_store=None, check_context=True):
     result = {}
+    historical_titles = None
     for row in tables["tasks"]:
         meta = store["tasks"].get(row["task_id"], {})
         stage = meta.get("stage", data["current_stage"])
-        result[row["task_id"]] = {"id": row["task_id"], "title": meta.get("title") or row["next_action"] or row["task_id"],
+        title = meta.get("title")
+        if not _meaningful_title(title):
+            if historical_titles is None:
+                historical_titles = legacy_task_titles(root)
+            title = historical_titles.get(row["task_id"])
+            if not title and row["status"] != "done" and _meaningful_title(row["next_action"]):
+                title = row["next_action"]
+            title = title or ((row.get("role") or "프로젝트") + " 작업 · " + row["task_id"])
+        result[row["task_id"]] = {"id": row["task_id"], "title": title,
             "stage": stage, "phase": phase(stage), "stage_unassigned": "stage" not in meta, "role": meta.get("role", row["role"]), "owner": row["owner"],
             "status": {"done": "done", "doing": "running", "blocked": "blocked"}.get(row["status"], "todo"),
             "requirement_ids": list(dict.fromkeys(starter.split_refs(row["requirement_ids"]) + meta.get("requirement_ids", []))), "depends_on": meta.get("depends_on", []),
@@ -680,7 +788,7 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
             if step["status"] in {"succeeded", "skipped"} and not valid:
                 status = "stale"
             previous = result.get(identifier, {})
-            result[identifier] = {**previous, "id": identifier, "title": meta.get("title", step["title"]),
+            result[identifier] = {**previous, "id": identifier, "title": meta["title"] if _meaningful_title(meta.get("title")) else step["title"],
                 "stage": stage, "phase": phase(stage), "stage_unassigned": "stage" not in meta,
                 "role": previous.get("role", meta.get("role", "")),
                 "owner": previous.get("owner", ""), "status": status,
@@ -817,10 +925,10 @@ def _usage_summary(records, commands, activities=()):
         if event.get("command_id") or identity in represented or str(event.get("agent_id", "")).startswith("runner:"):
             continue
         kind = event.get("kind")
-        if kind == "started":
+        if kind in {"started", "agent_started"}:
             native_total += 1
             native[identity] = True
-        elif kind in {"completed", "failed"}:
+        elif kind in {"completed", "failed", "agent_completed", "agent_failed"}:
             if not native.get(identity):
                 native_total += 1
             native[identity] = False
@@ -842,6 +950,27 @@ def _usage_summary(records, commands, activities=()):
             "scope": "recorded-attempts", "native_unreported_attempts": native_total}
 
 
+def command_matches_task(command, task):
+    """Old receipts remain history; only the same execution may affect status."""
+    if command.get("generation", 1) != task.get("generation", 1):
+        return False
+    if "step_ref" in command:
+        return command["step_ref"] == task.get("step_ref")
+    if command.get("run_id") or command.get("step_id"):
+        return {"run_id": command.get("run_id"), "step_id": command.get("step_id")} == task.get("step_ref")
+    return True
+
+
+def activity_matches_task(event, task, commands):
+    if event.get("command_id"):
+        command = next((c for c in commands if c["id"] == event["command_id"]), None)
+        return bool(command and command["task_id"] == task["id"] and command_matches_task(command, task))
+    if "generation" in event:
+        return command_matches_task(event, task)
+    # Unscoped legacy reports cannot prove which replay they describe.
+    return task.get("generation", 1) == 1
+
+
 def _summary_counts(tasks):
     values = list(tasks)
     counts = {"total": len(values), "completed": 0, "excluded": 0, "running": 0, "failed": 0,
@@ -850,7 +979,12 @@ def _summary_counts(tasks):
         status = task.get("status")
         if status in {"done", "succeeded"}: counts["completed"] += 1
         elif status == "skipped": counts["excluded"] += 1
-        elif status in {"running", "doing", "verifying"}: counts["running"] += 1
+        elif status in {"running", "doing", "verifying"}:
+            if task.get("result_pending") or task.get("execution_state") in {"completed", "idle"}:
+                counts["waiting"] += 1
+                counts["pending"] += 1
+            else:
+                counts["running"] += 1
         elif status == "failed": counts["failed"] += 1
         elif status == "blocked": counts["blocked"] += 1
         elif status == "stale": counts["stale"] += 1
@@ -973,7 +1107,7 @@ def snapshot(folder):
         task["ready"] = task["status"] == "todo" and not issues
         if issues and task["status"] in {"todo", "running", "done"}:
             task["status"], task["blocked_reason"], task["ready"] = "blocked", "; ".join(issues), False
-        commands = [c for c in store["queue"] if c["task_id"] == task["id"]]
+        commands = [c for c in store["queue"] if c["task_id"] == task["id"] and command_matches_task(c, task)]
         task["actual_start"] = next((c["started_at"] for c in commands if c.get("started_at")), None)
         task["actual_end"] = next((c["completed_at"] for c in reversed(commands) if c.get("completed_at")), None)
         if commands and commands[-1].get("status") == "failed" and task["status"] in {"todo", "blocked"}:
@@ -1013,24 +1147,48 @@ def snapshot(folder):
         "usage": _usage_summary(usage, store["queue"], activity_read(root)["events"]), "summary_counts": _summary_counts(tasks.values()),
         "capabilities": {"approve": True, "revision": True, "host_connected": runner_connected or any(a["status"] != "disconnected" for a in agents)},
         "host": {"connected": runner_connected or any(a["status"] != "disconnected" for a in agents), "runner_connected": runner_connected, "queued": sum(q["status"] == "queued" for q in store["queue"])}}
+    for task in result["tasks"]:
+        task["ledger_status"] = task["status"]
     enrich_activity(root, result)
+    from tools.native_observation import enrich_snapshot
+    enrich_snapshot(root, result)
+    result["usage"] = _usage_summary(usage, store["queue"], result["activities"])
+    scope = _task_scope(root, data, store, {t["id"]: t for t in result["tasks"]})
+    current_ids = set(scope["task_ids"])
+    result["current_scope"] = scope
+    run_store = runs.read(root)
+    declared_runs = {item.get("run_id") for item in store["execution_scopes"]}
+    result["execution_scopes"] = [
+        {"id": run["id"], "run_id": run["id"], "title": run["title"], "source": "legacy_run",
+         "task_ids": [t["id"] for t in result["tasks"] if t.get("run_id") == run["id"]]}
+        for run in run_store["runs"] if run["id"] not in declared_runs] + store["execution_scopes"]
+    result["history_runs"] = [{"id": run["id"], "title": run["title"], "scope_id": run.get("scope_id", run["id"]),
+        "steps": [{"id": step["id"], "title": step["title"], "status": step["status"],
+                   "valid": runs.valid_step(root, run, step), "inputs": step["inputs"],
+                   "expected_outputs": step.get("expected_outputs", []), "receipt_hashes": step.get("receipt_hashes", {}),
+                   "superseded": run["id"] + "/" + step["id"] in store["superseded_steps"]}
+                  for step in run["steps"]]} for run in run_store["runs"]]
+    result["history_tasks"] = [t for t in result["tasks"] if t["id"] not in current_ids]
+    result["summary_counts"] = _summary_counts(t for t in result["tasks"] if t["id"] in current_ids)
+    result["all_summary_counts"] = _summary_counts(result["tasks"])
     native_reported = any(not a["id"].startswith("runner:") for a in result["agents"])
-    native_connected = any(not a["id"].startswith("runner:") and a.get("status") != "disconnected" for a in result["agents"])
+    native_connected = any(not a["id"].startswith("runner:") and a.get("status") in {"running", "preparing", "starting"} and not a.get("superseded") and not a.get("stale") for a in result["agents"])
     execution_mode = ("mixed" if native_connected and runner_connected else
                       "cli" if runner_connected else "native" if native_connected else
                       "native" if native_reported else "cli" if runners else "unconnected")
     result["host"].update(data_connected=True, execution_mode=execution_mode, native_connected=native_connected,
-        native_stale_seconds=90, runner_stale_seconds=RUNNER_STALE_SECONDS,
+        native_stale_seconds=120 if result.get("native_sessions") else 90, runner_stale_seconds=RUNNER_STALE_SECONDS,
         latest_activity_at=result["activities"][-1]["at"] if result["activities"] else None)
     result["captured_at"] = result["capturedAt"]
     result["relations"] = result["edges"]
     result["logs"] = [{**e, "message": e["action"] + " · " + json.dumps(e.get("details", {}), ensure_ascii=False)} for e in result["events"]]
     result["usage"]["cost"] = result["usage"]["cost_usd"]
-    return redact_value(result)
+    from tools.native_observation import public_snapshot
+    return public_snapshot(result)
 
 
 def configure(folder, payload, actor="agent"):
-    if not isinstance(payload, dict) or set(payload) - {"expected_revision", "tasks", "gates", "capture_baselines", "policy"}:
+    if not isinstance(payload, dict) or set(payload) - {"expected_revision", "tasks", "gates", "capture_baselines", "policy", "current_scope"}:
         raise ValueError("관제 설정 필드가 잘못되었습니다.")
     root, data, tables = lifecycle.bundle(folder)
     with lock(root):
@@ -1061,8 +1219,8 @@ def configure(folder, payload, actor="agent"):
             if not isinstance(item, dict) or set(item) - allowed or item.get("id") not in known:
                 raise ValueError("기존 TASK 또는 실행 STEP의 메타데이터만 설정할 수 있습니다.")
             meta = {**store["tasks"].get(item["id"], {}), **{k: v for k, v in item.items() if k != "id"}}
-            if any(field in meta and (not isinstance(meta[field], str) or not meta[field].strip()) for field in ("title", "role")):
-                raise ValueError("작업 제목·역할은 비어 있지 않은 문자열이어야 합니다.")
+            if any(field in meta and (not isinstance(meta[field], str) or not meta[field].strip()) for field in ("title", "role")) or ("title" in meta and not _meaningful_title(meta["title"])):
+                raise ValueError("작업 제목·역할은 비어 있지 않은 문자열이어야 하며 완료 안내를 제목으로 쓰지 않습니다.")
             if meta.get("stage", data["current_stage"]) not in starter.STAGES:
                 raise ValueError("잘못된 업무 단계입니다.")
             if not isinstance(meta.get("depends_on", []), list) or not set(meta.get("depends_on", [])).issubset(known):
@@ -1085,11 +1243,36 @@ def configure(folder, payload, actor="agent"):
                 ref = meta["step_ref"]
                 if not isinstance(ref, dict) or set(ref) != {"run_id", "step_id"} or not any(r["id"] == ref["run_id"] and any(s["id"] == ref["step_id"] for s in r["steps"]) for r in runs.read(root)["runs"]):
                     raise ValueError("실제 RUN/STEP 연결이 필요합니다.")
+            previous_ref = store["tasks"].get(item["id"], {}).get("step_ref")
+            if previous_ref != meta.get("step_ref") and meta.get("step_ref") and any(
+                    command["task_id"] == item["id"] and command["status"] in {"claimed", "running"} for command in store["queue"]):
+                raise ValueError("수신·실행 중인 작업은 종료 결과를 기록한 뒤 새 STEP에 연결하세요.")
+            if previous_ref != meta.get("step_ref") and meta.get("step_ref") and (previous_ref or any(
+                    command["task_id"] == item["id"] for command in store["queue"])):
+                meta["generation"] = meta.get("generation", 1) + 1
+            if previous_ref and previous_ref != meta.get("step_ref"):
+                store["superseded_steps"].setdefault(previous_ref["run_id"] + "/" + previous_ref["step_id"],
+                    {**previous_ref, "task_id": item["id"], "at": starter.now(), "superseded_by": meta.get("step_ref")})
             store["tasks"][item["id"]] = meta
         refs = [json.dumps(v["step_ref"], sort_keys=True) for v in store["tasks"].values() if "step_ref" in v]
         if len(refs) != len(set(refs)):
             raise ValueError("한 실행 STEP을 여러 TASK에 중복 연결하지 않습니다.")
         known = task_records(root, data, tables, store)
+        if "current_scope" in payload:
+            scope = payload["current_scope"]
+            if scope is None:
+                store.pop("current_scope", None)
+            else:
+                if (not isinstance(scope, dict) or set(scope) - {"id", "title", "task_ids"}
+                        or not isinstance(scope.get("title"), str) or not scope["title"].strip()
+                        or not isinstance(scope.get("task_ids"), list) or not scope["task_ids"]
+                        or any(not isinstance(i, str) for i in scope["task_ids"])
+                        or len(set(scope["task_ids"])) != len(scope["task_ids"])
+                        or not set(scope["task_ids"]).issubset(known)
+                        or ("id" in scope and (not isinstance(scope["id"], str) or not scope["id"].strip()))):
+                    raise ValueError("현재 실행 범위에는 제목과 실제 고유 작업 ID 목록이 필요합니다.")
+                store["current_scope"] = {"id": scope.get("id", "selected"), "title": redact_text(scope["title"]),
+                                          "task_ids": scope["task_ids"]}
         for task in known.values():
             if task["id"] in ancestors(known, task["id"]):
                 raise ValueError("작업 의존 관계는 순환할 수 없습니다.")
@@ -1286,8 +1469,8 @@ def validate_usage(usage):
     return dict(usage)
 
 
-def enqueue_ready(root, data, tables, store):
-    tasks = task_records(root, data, tables, store)
+def enqueue_ready(root, data, tables, store, *, run_store=None):
+    tasks = task_records(root, data, tables, store, run_store=run_store)
     for task in tasks.values():
         # Revision work has its own explicit queue entry and does not replay old runs.
         if task["status"] == "todo" and not blockers(root, store, tasks, task["id"]):
@@ -1462,7 +1645,7 @@ def host_event(folder, payload):
             for queued in store["queue"]:
                 if queued["status"] == "claimed" and queued.get("lease_expires_at", "") < now:
                     queued.update(status="queued", previous_agent_id=queued.pop("agent_id", None))
-            command = next((q for q in store["queue"] if q["status"] == "queued" and (not payload.get("task_id") or q["task_id"] == payload["task_id"])
+            command = next((q for q in store["queue"] if q["status"] == "queued" and command_matches_task(q, tasks[q["task_id"]]) and (not payload.get("task_id") or q["task_id"] == payload["task_id"])
                 and role_matches(tasks[q["task_id"]].get("role", ""), payload["role"]) and not blockers(root, store, tasks, q["task_id"])), None)
             if command:
                 generated, fresh_task = materialize_run_generation(root, data, tables, store, tasks[command["task_id"]])
@@ -1470,6 +1653,7 @@ def host_event(folder, payload):
                     extra[runs.STORE] = json_bytes(generated)
                     tasks[command["task_id"]] = fresh_task
                 command.update(status="claimed", agent_id=agent["id"], claimed_at=now, lease_expires_at=lease_end,
+                               generation=tasks[command["task_id"]].get("generation", 1), step_ref=tasks[command["task_id"]].get("step_ref"),
                                execution_hash=job_contract_hash(tasks[command["task_id"]]))
                 agent.update(status="idle", task_id=command["task_id"])
         elif payload["kind"] != "heartbeat":
@@ -1478,6 +1662,8 @@ def host_event(folder, payload):
             if command is None or command.get("agent_id") != agent["id"] or command["status"] not in allowed_status:
                 raise Conflict("이 작업자가 소유한 유효한 실행 요청이 아닙니다.")
             task = tasks[command["task_id"]]
+            if not command_matches_task(command, task):
+                raise Conflict("이전 실행 세대의 요청입니다. 현재 TASK/STEP에 기록할 수 없습니다.")
             if payload["kind"] != "failed" and blockers(root, store, tasks, task["id"]):
                 raise Conflict("선행 작업/승인 상태가 변경되었습니다.")
             if payload["kind"] in {"started", "completed"} and command.get("execution_hash", job_contract_hash(task)) != job_contract_hash(task):

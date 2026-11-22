@@ -15,9 +15,19 @@ import {
 import { makeDemo, tickDemo, demoDiff } from "./simulation";
 import { LatestRequest, isSnapshotBusy } from "./request-state";
 import { WorkspaceBoundary } from "./WorkspaceBoundary";
-import { taskSummary, hasIssue, waiting, usageCoverage } from "./model";
+import {
+  taskSummary,
+  hasIssue,
+  waiting,
+  usageCoverage,
+  currentTasks,
+  historyTasks,
+  nativeWorkers,
+  executionLabel,
+} from "./model";
 import { VerificationBadge } from "./VerificationBadge";
 import { ArtefactDelivery } from "./ArtefactDelivery";
+import { RunHistory } from "./RunHistory";
 import "./quality-observer.css";
 import {
   Observer,
@@ -79,6 +89,7 @@ function WorkspaceContent({
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [mode, setMode] = useState<"demo" | "local" | "snapshot">("demo");
   const [tab, setTab] = useState("activity");
+  const [workScope, setWorkScope] = useState<"current" | "history">("current");
   const [navOpen, setNavOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -348,9 +359,18 @@ function WorkspaceContent({
       diffRequest.current.cancel();
     };
   }, []);
+  const scopeTasks = useMemo(
+    () =>
+      snapshot
+        ? workScope === "history"
+          ? historyTasks(snapshot)
+          : currentTasks(snapshot)
+        : [],
+    [snapshot, workScope],
+  );
   const tasks = useMemo(
     () =>
-      snapshot?.tasks.filter(
+      scopeTasks.filter(
         (t) =>
           (phaseFilter === "all" || phaseOf(t) === phaseFilter) &&
           (roleFilter === "all" || t.role === roleFilter) &&
@@ -367,7 +387,7 @@ function WorkspaceContent({
               .toLowerCase()
               .includes(query.toLowerCase())),
       ) || [],
-    [snapshot, query, statusFilter, phaseFilter, roleFilter],
+    [snapshot, scopeTasks, query, statusFilter, phaseFilter, roleFilter],
   );
   const relatedTasks = useMemo(() => {
     if (!snapshot || !selection) return [];
@@ -579,7 +599,14 @@ function WorkspaceContent({
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
   };
-  const counts = taskSummary(snapshot?.tasks || [], snapshot || undefined);
+  const counts = taskSummary(
+    snapshot ? currentTasks(snapshot) : [],
+    snapshot || undefined,
+  );
+  const workers = snapshot ? nativeWorkers(snapshot) : [];
+  const activeWorkers = connected
+    ? workers.filter((a) => freshAgent(a, now)).length
+    : 0;
   const count = counts.total;
   const done = counts.done;
   const running = snapshot
@@ -599,6 +626,9 @@ function WorkspaceContent({
         (a) => a.provider === provider && freshAgent(a, now),
       ));
 
+  const nativeMonitor = snapshot?.host?.native_monitor;
+  const nativeMonitorUnavailable =
+    mode === "local" && nativeMonitor?.status === "unavailable";
   const supervisorNotice =
     mode === "local" &&
     connected &&
@@ -982,21 +1012,47 @@ function WorkspaceContent({
           )}
         </div>
       </header>
-      {error && (
-        <div role="alert" className="connection-error">
-          <Icon name="info" size={16} />
-          <span>{error} 마지막 수신 상태를 유지합니다.</span>
-        </div>
-      )}
-      {supervisorNotice && (
+      {(error || supervisorNotice || nativeMonitorUnavailable) && (
         <div
-          role="status"
-          aria-live="polite"
-          className="connection-error"
-          data-supervisor-state={supervisor.status}
+          className="workspace-notices"
+          role="region"
+          aria-label="실행·연결 알림"
+          tabIndex={0}
         >
-          <Icon name="info" size={16} />
-          <span>{supervisorNotice}</span>
+          {nativeMonitorUnavailable && (
+            <div
+              className="native-monitor-notice"
+              role="status"
+              aria-live="polite"
+              data-native-monitor-state="unavailable"
+            >
+              <Icon name="info" size={17} />
+              <div>
+                <strong>실행 관측 지연 · 보관 이벤트 재수신 중</strong>
+                <p>
+                  {nativeMonitor?.last_error ||
+                    "현재 작업 상태가 늦게 표시될 수 있습니다. 작업 목록과 마지막 수신 기록을 유지합니다."}
+                </p>
+              </div>
+            </div>
+          )}
+          {error && (
+            <div role="alert" className="connection-error">
+              <Icon name="info" size={16} />
+              <span>{error} 마지막 수신 상태를 유지합니다.</span>
+            </div>
+          )}
+          {supervisorNotice && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="connection-error"
+              data-supervisor-state={supervisor.status}
+            >
+              <Icon name="info" size={16} />
+              <span>{supervisorNotice}</span>
+            </div>
+          )}
         </div>
       )}
       <div className="workspace-overview">
@@ -1024,12 +1080,12 @@ function WorkspaceContent({
           </div>
           <div
             className="overall-progress"
-            aria-label={`적용 대상 ${counts.applicable}개 중 ${done}개 완료 · 적용 제외 ${counts.excluded}개`}
+            aria-label={`현재 범위 적용 대상 ${counts.applicable}개 중 ${done}개 완료 · 적용 제외 ${counts.excluded}개`}
           >
             <div>
               <strong>
                 {counts.applicable
-                  ? `${done} / ${counts.applicable} 완료`
+                  ? `현재 범위 ${done} / ${counts.applicable} 완료`
                   : "적용 대상 없음"}
               </strong>
               <b>
@@ -1040,7 +1096,7 @@ function WorkspaceContent({
             {progress != null && (
               <div
                 role="progressbar"
-                aria-label="적용 대상 작업 완료 비율"
+                aria-label="현재 범위 적용 대상 작업 완료 비율"
                 aria-valuenow={progress}
                 aria-valuemin={0}
                 aria-valuemax={100}
@@ -1058,9 +1114,10 @@ function WorkspaceContent({
               </span>
               <span>·</span>
               <span>{counts.excluded} 적용 제외</span>
-              {snapshot?.tasks.some(
-                (t) => active(t) && !taskIsLive(snapshot, t, now, mode),
-              ) && <span>· 활동 확인 필요</span>}
+              {snapshot &&
+                currentTasks(snapshot).some(
+                  (t) => active(t) && !taskIsLive(snapshot, t, now, mode),
+                ) && <span>· 활동 확인 필요</span>}
             </small>
           </div>
         </div>
@@ -1077,7 +1134,7 @@ function WorkspaceContent({
             </small>
           </div>
           <div>
-            <span>실제 작업</span>
+            <span>실제 작업 · 활성 작업자 {activeWorkers}명</span>
             <strong>
               {mode === "snapshot"
                 ? "스냅샷 시점의 기록"
@@ -1085,11 +1142,13 @@ function WorkspaceContent({
                   ? "합성 시나리오"
                   : running
                     ? `${running}개 작업에서 실제 활동 보고`
-                    : counts.active
-                      ? "진행 기록의 활동 확인 필요"
-                      : counts.attention
-                        ? `${counts.attention}개 작업 확인 필요`
-                        : "보고된 실행 작업 없음"}
+                    : activeWorkers
+                      ? `작업자 ${activeWorkers}명 실제 활동 관측`
+                      : counts.active
+                        ? "진행 기록의 활동 확인 필요"
+                        : counts.attention
+                          ? `${counts.attention}개 작업 확인 필요`
+                          : "보고된 실행 작업 없음"}
             </strong>
             <small>
               {lastActivity?.at || snapshot?.host?.latest_activity_at
@@ -1114,6 +1173,49 @@ function WorkspaceContent({
           </p>
         </div>
       </div>
+      {snapshot?.current_scope && (
+        <div className="scope-bar" aria-label="작업 집계 범위">
+          <div>
+            <small>{snapshot.current_scope.label || "현재 작업 범위"}</small>
+            <strong>{snapshot.current_scope.title}</strong>
+            <span>
+              현재 {currentTasks(snapshot).length}개 · 전체 원장{" "}
+              {snapshot.tasks.length}개
+            </span>
+          </div>
+          <div
+            className="scope-switch"
+            role="group"
+            aria-label="현재 작업과 실행 이력"
+          >
+            <button
+              aria-pressed={workScope === "current"}
+              onClick={() => {
+                setWorkScope("current");
+                setSelection(null);
+              }}
+            >
+              현재 작업
+            </button>
+            <button
+              aria-pressed={workScope === "history"}
+              onClick={() => {
+                setWorkScope("history");
+                setSelection(null);
+              }}
+            >
+              실행 이력 <b>{historyTasks(snapshot).length}</b>
+            </button>
+          </div>
+        </div>
+      )}
+      {workScope === "history" && snapshot && (
+        <div className="scope-history-note" role="status">
+          과거 작업과 실패·재검증 기록입니다. 위 완료율은 현재 범위만
+          집계합니다. 실행 기록 {(snapshot.history_runs || []).length}건을
+          보존하고 있습니다.
+        </div>
+      )}
       {(tab === "artifacts" ||
         (tab !== "activity" &&
           (!tasks.length || (isMobile && !mobileGraph)))) &&
@@ -1194,16 +1296,21 @@ function WorkspaceContent({
               )}
             </div>
           ) : tab === "activity" ? (
-            <Observer
-              snapshot={snapshot}
-              tasks={tasks}
-              selection={selection}
-              select={select}
-              now={now}
-              mode={mode}
-              connected={connected}
-              toolbar={toolbar}
-            />
+            <>
+              {workScope === "history" && (
+                <RunHistory runs={snapshot.history_runs || []} />
+              )}
+              <Observer
+                snapshot={snapshot}
+                tasks={tasks}
+                selection={selection}
+                select={select}
+                now={now}
+                mode={mode}
+                connected={connected}
+                toolbar={toolbar}
+              />
+            </>
           ) : !tasks.length ? (
             <Empty
               text={
@@ -1329,7 +1436,11 @@ function WorkspaceContent({
                   {task && (
                     <span>{ROLE[task.role] || task.role || "담당 미정"}</span>
                   )}
-                  {task && <StatusBadge status={task.status} />}
+                  {task && (
+                    <>
+                      <StatusBadge status={task.status} task={task} />
+                    </>
+                  )}
                 </div>
               </div>
               <div
@@ -1619,6 +1730,60 @@ function WorkspaceContent({
                     <section className="inspector-section">
                       <h3>실행 연결</h3>
                       <Resource
+                        label="원장 상태"
+                        value={
+                          task?.ledger_status
+                            ? labels[task.ledger_status] || task.ledger_status
+                            : labels[task?.status || ""] || "미보고"
+                        }
+                      />
+                      <Resource
+                        label="실제 실행"
+                        value={
+                          task
+                            ? executionLabel(task) ||
+                              (
+                                {
+                                  starting: "실행 준비 중",
+                                  preparing: "프로젝트 준비 중",
+                                  running: "실행 중",
+                                  completed: "실행 종료",
+                                  failed: "실행 실패",
+                                  idle: "호스트 대기 중",
+                                  disconnected: "연결 확인 필요",
+                                } as Record<string, string>
+                              )[task.execution_state] ||
+                              "실행 관측 없음"
+                            : "실행 관측 없음"
+                        }
+                      />
+                      <Resource
+                        label="실제 작업자 ID"
+                        value={
+                          selectedAgent?.native_agent_id ||
+                          task?.native_agent_id ||
+                          "작업 연결 대기"
+                        }
+                      />
+                      <Resource
+                        label="세션 ID"
+                        value={
+                          selectedAgent?.session_id ||
+                          task?.session_id ||
+                          "미보고"
+                        }
+                      />
+                      <Resource
+                        label="관측 출처"
+                        value={
+                          task?.runtime_source === "codex_rollout"
+                            ? "Codex 실행 이벤트"
+                            : task?.runtime_source === "host_hook"
+                              ? "호스트 수명주기 이벤트"
+                              : "수동·호스트 보고"
+                        }
+                      />
+                      <Resource
                         label="RUN / STEP"
                         value={
                           task?.run_id
@@ -1833,7 +1998,7 @@ function TaskLink({
         <small className="mono">{task.id}</small>
         <strong>{task.title}</strong>
       </span>
-      <StatusBadge status={task.status} />
+      <StatusBadge status={task.status} task={task} />
     </button>
   );
 }

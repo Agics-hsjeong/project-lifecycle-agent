@@ -1,5 +1,5 @@
 import React from "react";
-import { labels } from "./model";
+import { labels, active, executionLabel, type Task } from "./model";
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
   const shapes: Record<string, React.ReactNode> = {
@@ -109,7 +109,10 @@ export function Icon({ name, size = 18 }: { name: string; size?: number }) {
     </svg>
   );
 }
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, task }: { status: string; task?: Task }) {
+  const runtime = task ? executionLabel(task) : null;
+  if (task && !active(task) && ["doing", "running"].includes(status))
+    status = "todo";
   return (
     <span className={`status status-${status}`}>
       <span aria-hidden="true">
@@ -123,7 +126,7 @@ export function StatusBadge({ status }: { status: string }) {
               ? "!"
               : "·"}
       </span>
-      {labels[status] || status}
+      {runtime || labels[status] || status}
     </span>
   );
 }

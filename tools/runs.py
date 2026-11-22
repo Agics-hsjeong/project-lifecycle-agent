@@ -79,7 +79,8 @@ def save(root, store, action, actor, details):
 def create(folder, payload, actor="agent"):
     from tools import starter, lifecycle
     root, _, tables = lifecycle.bundle(folder)
-    if not isinstance(payload, dict) or set(payload) != {"expected_revision", "key", "title", "requirement_ids", "steps"}:
+    if (not isinstance(payload, dict) or not {"expected_revision", "key", "title", "requirement_ids", "steps"}.issubset(payload)
+            or set(payload) - {"expected_revision", "key", "title", "requirement_ids", "steps", "bindings", "scope"}):
         raise ValueError("실행 계획의 필드가 잘못되었습니다.")
     if not all(isinstance(payload[k], str) and payload[k].strip() for k in ("key", "title")):
         raise ValueError("실행 key와 title이 필요합니다.")
@@ -92,7 +93,7 @@ def create(folder, payload, actor="agent"):
                 raise ValueError("같은 key로 다른 작업을 만들 수 없습니다.")
             return {"run_id": prior["id"], "unchanged": True}
         require_revision(root, payload)
-        tables = lifecycle.bundle(root)[2]
+        _, project, tables = lifecycle.bundle(root)
         ids = payload["requirement_ids"]
         if not isinstance(ids, list) or not ids or any(not isinstance(i, str) for i in ids) or not set(ids).issubset({r["requirement_id"] for r in tables["requirements"]}):
             raise ValueError("실행 범위의 실제 요구사항 ID가 필요합니다.")
@@ -127,10 +128,56 @@ def create(folder, payload, actor="agent"):
             seen.add(identifier)
             steps.append({**step, "status": "planned", "attempts": 0, "results": [], "receipt_hashes": {}})
         identifier = f"RUN-{len(store['runs']) + 1:03d}"
+        from tools import workspace
+        meta = workspace.read(root)
+        bindings = payload.get("bindings", {})
+        known_tasks = {row["task_id"] for row in tables["tasks"]}
+        if (not isinstance(bindings, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in bindings.items())
+                or not set(bindings).issubset(seen) or not set(bindings.values()).issubset(known_tasks)
+                or len(set(bindings.values())) != len(bindings)):
+            raise ValueError("단계별 실제 고유 TASK 연결이 필요합니다.")
+        scope = payload.get("scope", {})
+        if (not isinstance(scope, dict) or set(scope) - {"id", "title", "supersedes"}
+                or any(k in scope and (not isinstance(scope[k], str) or not scope[k].strip()) for k in ("id", "title"))
+                or not isinstance(scope.get("supersedes", []), list)
+                or any(not isinstance(i, str) for i in scope.get("supersedes", []))):
+            raise ValueError("실행 범위에는 id/title/supersedes 목록만 사용할 수 있습니다.")
+        prior_scopes = {s["id"] for s in meta["execution_scopes"]}
+        prior_scopes.update(r["id"] for r in store["runs"])
+        if not set(scope.get("supersedes", [])).issubset(prior_scopes):
+            raise ValueError("실제 이전 실행 범위만 대체할 수 있습니다.")
+        scope_id = scope.get("id", identifier)
+        if scope_id in prior_scopes:
+            raise ValueError("실행 범위 ID는 고유해야 합니다.")
+        workspace.preserve_task_titles(root, tables, meta)
+        for step_id, task_id in bindings.items():
+            if any(command["task_id"] == task_id and command["status"] in {"claimed", "running"} for command in meta["queue"]):
+                raise ValueError("수신·실행 중인 작업은 종료 결과를 기록한 뒤 새 STEP에 연결하세요.")
+            task_meta = meta["tasks"].setdefault(task_id, {})
+            previous = task_meta.get("step_ref")
+            if previous or any(command["task_id"] == task_id for command in meta["queue"]):
+                task_meta["generation"] = task_meta.get("generation", 1) + 1
+            if previous:
+                meta["superseded_steps"].setdefault(previous["run_id"] + "/" + previous["step_id"],
+                    {**previous, "task_id": task_id, "at": starter.now(), "superseded_by": identifier + "/" + step_id})
+            task_meta["step_ref"] = {"run_id": identifier, "step_id": step_id}
+            if task_meta.get("title_source") == "fallback":
+                task_meta["title"] = next(step["title"] for step in steps if step["id"] == step_id)
+                task_meta["title_source"] = "run_step"
         store["runs"].append({"id": identifier, "key": payload["key"], "signature": signature,
-                             "title": payload["title"], "requirement_ids": ids, "steps": steps})
-        revision = save(root, store, "run-create", actor, {"run_id": identifier})
-        return {"run_id": identifier, "revision": revision, "unchanged": False}
+                             "title": payload["title"], "requirement_ids": ids, "steps": steps, "scope_id": scope_id})
+        selected = {"id": scope_id, "title": scope.get("title", payload["title"]), "run_id": identifier,
+                    "task_ids": [bindings.get(step["id"], f"{project['project_id']}/{identifier}/{step['id']}") for step in steps],
+                    "supersedes": scope.get("supersedes", []), "declared_at": starter.now()}
+        meta["execution_scopes"].append(selected)
+        # New plans become the current declared scope, irrespective of outcome.
+        meta.pop("current_scope", None)
+        if meta["policy"].get("auto_run"):
+            workspace.enqueue_ready(root, project, tables, meta, run_store=store)
+        changes = {STORE: json_bytes(store), workspace.STORE: json_bytes(meta)}
+        revision = lifecycle.add_event(root, changes, "run-create", actor, {"run_id": identifier, "scope_id": scope_id})
+        commit(root, changes)
+        return {"run_id": identifier, "revision": revision, "unchanged": False, "scope": selected}
 
 
 def result(folder, payload, actor="agent"):

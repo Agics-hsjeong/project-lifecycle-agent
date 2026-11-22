@@ -951,6 +951,509 @@ try {
     check(requests === 4, "read-only file actions issue only requested GETs");
     await p.close();
   }
+  // Current progress excludes historical failures; actor lifecycle is independent of ledger completion.
+  for (const width of [1440, 390, 320]) {
+    const raw = snapshot();
+    raw.tasks[0].status = "done";
+    raw.tasks[0].title = "변하지 않는 작업 이름";
+    const old = {
+      ...structuredClone(raw.tasks[0]),
+      id: "OLD-FAILED",
+      title: "이전 실패 작업",
+      status: "failed",
+    };
+    raw.tasks.push(old);
+    raw.current_scope = {
+      id: "RUN-LATEST",
+      title: "현재 구현과 독립 검증",
+      source: "latest_run",
+      label: "최근 실행",
+      task_ids: ["TASK-R"],
+    };
+    raw.history_tasks = [old];
+    raw.history_runs = [
+      {
+        run_id: "RUN-OLD",
+        status: "failed",
+        steps: [
+          { id: "old-step", title: "실패한 이전 시도", status: "failed" },
+        ],
+      },
+    ];
+    raw.agents = [
+      {
+        id: "session-worker",
+        native_agent_id: "/root/reviewer",
+        session_id: "actual-session",
+        name: "검토 작업자",
+        provider: "codex",
+        role: "reviewer",
+        task_ids: ["TASK-R"],
+        status: "running",
+        last_seen: new Date().toISOString(),
+      },
+    ];
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes(
+        "현재 범위 1 / 1 완료",
+      ),
+      `${width}: progress names and counts only current scope`,
+    );
+    check(
+      (await p.locator('.b-task-row[data-task-id="OLD-FAILED"]').count()) === 0,
+      `${width}: historical failure excluded from current board`,
+    );
+    check(
+      (await p.locator(".native-workers").innerText()).includes(
+        "/root/reviewer",
+      ),
+      `${width}: actual native ID visible without substituting role alias`,
+    );
+    if (process.env.IEUM_TEST_SCREENSHOTS) {
+      fs.mkdirSync(process.env.IEUM_TEST_SCREENSHOTS, { recursive: true });
+      await p.screenshot({
+        path: path.join(
+          process.env.IEUM_TEST_SCREENSHOTS,
+          `native-scope-${width}.png`,
+        ),
+        fullPage: true,
+      });
+    }
+    await p.getByRole("button", { name: /실행 이력/ }).click();
+    await p.locator('.b-task-row[data-task-id="OLD-FAILED"]').waitFor();
+    check(
+      (await p.locator(".scope-history-note").innerText()).includes(
+        "현재 범위만",
+      ),
+      `${width}: history states its independent denominator`,
+    );
+    await p.locator(".run-history summary").click();
+    check(
+      (await p.locator(".run-history").innerText()).includes(
+        "실패한 이전 시도",
+      ),
+      `${width}: archived failed run remains inspectable`,
+    );
+    await p.getByRole("button", { name: "현재 작업", exact: true }).click();
+    check(
+      (
+        await p.locator('.b-task-row[data-task-id="TASK-R"]').innerText()
+      ).includes("변하지 않는 작업 이름"),
+      `${width}: title survives history navigation`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+      `${width}: scope and native metadata do not overflow viewport`,
+    );
+    await p.locator(".native-workers button").first().click();
+    const schedule = p.getByRole("tab", { name: "일정·리소스" });
+    await schedule.focus();
+    await schedule.press("Enter");
+    await p.locator(".resource").filter({ hasText: "세션 ID" }).waitFor();
+    check(
+      (await p.locator(".inspector-content").innerText()).includes(
+        "actual-session",
+      ),
+      `${width}: keyboard opens truthful session metadata`,
+    );
+    await p.close();
+  }
+  {
+    let raw = snapshot();
+    Object.assign(raw.tasks[0], {
+      status: "running",
+      ledger_status: "todo",
+      execution_state: "running",
+      native_agent_id: "actual-worker",
+      session_id: "s1",
+      runtime_source: "host_hook",
+    });
+    raw.agents = [
+      {
+        id: "actor",
+        native_agent_id: "actual-worker",
+        session_id: "s1",
+        role: "backend",
+        task_id: "TASK-R",
+        status: "running",
+        last_seen: new Date().toISOString(),
+      },
+    ];
+    const p = await pageFor((route) => route.fulfill({ json: raw }));
+    check(
+      (
+        await p.locator('.b-task-row[data-task-id="TASK-R"]').innerText()
+      ).includes("진행 중"),
+      "native lifecycle drives running before manual ledger update",
+    );
+    raw.agents[0].last_seen = new Date(Date.now() - 600000).toISOString();
+    await refresh(p);
+    await p.locator(".native-workers").filter({ hasText: "10분 전" }).waitFor();
+    check(
+      (await p.locator(".execution-hud").innerText()).includes(
+        "활성 작업자 1명",
+      ),
+      "long native reasoning stays active until a lifecycle stop",
+    );
+    check(
+      (await p.locator(".native-workers").innerText()).includes("10분 전"),
+      "old native event age remains visible during long reasoning",
+    );
+    raw = structuredClone(raw);
+    Object.assign(raw.tasks[0], {
+      status: "todo",
+      execution_state: "completed",
+      result_pending: true,
+    });
+    raw.agents[0].status = "completed";
+    await refresh(p);
+    await p
+      .locator(".b-task-row")
+      .filter({ hasText: "실행 종료 · 결과 확인 중" })
+      .waitFor();
+    check(
+      (await p.locator(".overall-progress").innerText()).includes("0 / 1 완료"),
+      "agent stop cannot fabricate task completion",
+    );
+    await p.close();
+  }
+  {
+    const raw = snapshot();
+    raw.agents = [
+      {
+        id: "superseded-actor",
+        native_agent_id: "old-worker",
+        session_id: "old-session",
+        task_id: "TASK-R",
+        status: "running",
+        superseded: true,
+        last_seen: new Date().toISOString(),
+      },
+    ];
+    const p = await pageFor((route) => route.fulfill({ json: raw }));
+    check(
+      (await p.locator(".native-workers").count()) === 0,
+      "superseded native actor is absent from current worker panel",
+    );
+    check(
+      (
+        await p.locator('.b-task-row[data-task-id="TASK-R"]').innerText()
+      ).includes("활동 확인 필요"),
+      "late old-generation actor cannot make current task live",
+    );
+    await p.close();
+  }
+  {
+    const raw = snapshot();
+    raw.tasks = [];
+    raw.agents = [
+      {
+        id: "preparing",
+        native_agent_id: "actual-main",
+        session_id: "s-prep",
+        provider: "claude",
+        status: "running",
+        last_seen: new Date().toISOString(),
+      },
+    ];
+    raw.activity = [
+      {
+        kind: "session_started",
+        at: new Date().toISOString(),
+        summary: "호스트 세션 시작",
+        native_agent_id: "actual-main",
+        session_id: "s-prep",
+        runtime_source: "host_hook",
+      },
+    ];
+    const p = await pageFor((route) => route.fulfill({ json: raw }));
+    check(
+      (await p.locator(".native-workers").innerText()).includes(
+        "작업 연결 대기",
+      ),
+      "unbound actual session is visible without guessing a task",
+    );
+    check(
+      (await p.locator(".b-context").innerText()).includes("호스트 세션 시작"),
+      "preparation activity remains visible before tasks exist",
+    );
+    await p.close();
+  }
+  // A reused TASK must not inherit an older CLI run's failure, notes or time bar.
+  for (const width of [1440, 390]) {
+    const raw = snapshot();
+    Object.assign(raw.tasks[0], {
+      status: "todo",
+      generation: 2,
+      step_ref: { run_id: "RUN-NEW", step_id: "STEP-NEW" },
+      run_id: "RUN-NEW",
+      step_id: "STEP-NEW",
+      observed_status: "failed",
+    });
+    raw.current_scope = {
+      id: "RUN-NEW",
+      title: "다시 시작한 실행",
+      source: "latest_run",
+      task_ids: ["TASK-R"],
+    };
+    raw.commands = [
+      {
+        id: "CLI-OLD",
+        task_id: "TASK-R",
+        generation: 1,
+        step_ref: { run_id: "RUN-OLD", step_id: "STEP-OLD" },
+        status: "failed",
+        notes: "OLD_CLI_FAILURE",
+        started_at: "2024-01-01T00:00:00Z",
+        completed_at: "2024-01-01T00:01:00Z",
+      },
+    ];
+    raw.activity = [
+      {
+        task_id: "TASK-R",
+        command_id: "CLI-OLD",
+        kind: "started",
+        at: "2024-01-01T00:00:00Z",
+        summary: "이전 CLI 실행",
+      },
+      {
+        task_id: "TASK-R",
+        command_id: "CLI-OLD",
+        kind: "failed",
+        at: "2024-01-01T00:01:00Z",
+        summary: "이전 CLI 실패",
+      },
+    ];
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes("1 대기"),
+      `${width}: previous CLI generation cannot raise current issue count`,
+    );
+    check(
+      !(
+        await p.locator('.b-task-row[data-task-id="TASK-R"]').innerText()
+      ).includes("실행 실패"),
+      `${width}: rebound task does not inherit old CLI failure`,
+    );
+    check(
+      !(await p.locator(".b-observer").innerText()).includes("OLD_CLI_FAILURE"),
+      `${width}: current notes exclude old command failure`,
+    );
+    if (width === 1440) {
+      await p
+        .locator(".workspace-tabs button")
+        .filter({ hasText: "타임라인" })
+        .click();
+      await p.locator('.wbs-sheet-row[data-task-id="TASK-R"]').waitFor();
+      check(
+        !(
+          await p.locator('.wbs-sheet-row[data-task-id="TASK-R"]').innerText()
+        ).includes("실패"),
+        "WBS uses the current CLI execution reference",
+      );
+      check(
+        (await p.locator(".scene-meta").innerText()).includes("실행 기록 0"),
+        "old CLI interval is not drawn as current run time",
+      );
+      await p
+        .locator(".workspace-tabs button")
+        .filter({ hasText: "실행 현황" })
+        .click();
+    }
+    raw.commands.push({
+      id: "CLI-CURRENT",
+      task_id: "TASK-R",
+      generation: 2,
+      step_ref: { run_id: "RUN-NEW", step_id: "STEP-NEW" },
+      status: "failed",
+      notes: "CURRENT_CLI_FAILURE",
+    });
+    await refresh(p);
+    await p
+      .locator('.b-task-row[data-task-id="TASK-R"]')
+      .filter({ hasText: "CURRENT_CLI_FAILURE" })
+      .waitFor();
+    check(
+      (
+        await p.locator('.b-task-row[data-task-id="TASK-R"]').innerText()
+      ).includes("실행 실패"),
+      `${width}: same-generation CLI failure remains visible`,
+    );
+    await p.close();
+  }
+  // A healthy data channel must not hide a delayed native execution observer.
+  for (const width of [1440, 390, 320]) {
+    const raw = snapshot();
+    raw.host = {
+      connected: true,
+      data_connected: true,
+      execution_mode: "native",
+      native_monitor: {
+        status: "unavailable",
+        last_error:
+          "네이티브 실행 기록 연결을 확인하세요. 보관된 이벤트는 유지합니다.",
+        events_read: 0,
+      },
+      supervisor: {
+        configured: true,
+        status: "retrying",
+        provider: "codex",
+        next_retry_seconds: 4,
+        last_error: "추가 실행기 연결 확인",
+      },
+    };
+    raw.current_scope = {
+      id: "monitor-scope",
+      title: "현재 관측 범위",
+      source: "project",
+      task_ids: ["TASK-R"],
+    };
+    let fail = false;
+    const p = await pageFor(
+      (route) =>
+        route.fulfill(
+          fail
+            ? {
+                status: 503,
+                json: { error: "Synthetic transport unavailable" },
+              }
+            : { json: raw },
+        ),
+      undefined,
+      false,
+      width,
+    );
+    await p.locator(".native-monitor-notice").waitFor();
+    check(
+      (await p.locator(".native-monitor-notice").innerText()).includes(
+        "실행 관측 지연 · 보관 이벤트 재수신 중",
+      ),
+      `${width}: native observation delay is explicit`,
+    );
+    check(
+      (await p.locator(".native-monitor-notice").innerText()).includes(
+        raw.host.native_monitor.last_error,
+      ),
+      `${width}: native monitor fixed error text is visible`,
+    );
+    check(
+      (await p.locator("body").innerText()).includes("데이터 연결됨"),
+      `${width}: data transport remains distinct from native monitor health`,
+    );
+    check(
+      (await p.locator('.b-task-row[data-task-id="TASK-R"]').count()) === 1,
+      `${width}: native monitor delay keeps the current task board usable`,
+    );
+    const initialBoxes = await p
+      .locator(".workspace-notices > *")
+      .evaluateAll((nodes) =>
+        nodes.map((n) => {
+          const r = n.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom };
+        }),
+      );
+    check(
+      initialBoxes.length === 2 &&
+        initialBoxes.every(
+          (b, i) => i === 0 || b.top >= initialBoxes[i - 1].bottom - 1,
+        ),
+      `${width}: CLI and native notices stack without overlap`,
+    );
+    await p
+      .locator('.b-task-row[data-task-id="TASK-R"] button')
+      .first()
+      .click();
+    if (width < 800)
+      await p
+        .getByRole("button", { name: "작업 상세 닫기", exact: true })
+        .click();
+    fail = true;
+    await refresh(p);
+    await p
+      .getByRole("alert")
+      .filter({ hasText: "Synthetic transport unavailable" })
+      .waitFor();
+    check(
+      await p.getByRole("alert").locator("span").isVisible(),
+      `${width}: transport error reason remains readable on mobile`,
+    );
+    const boxes = await p
+      .locator(".workspace-notices > *")
+      .evaluateAll((nodes) =>
+        nodes.map((n) => {
+          const r = n.getBoundingClientRect();
+          return { top: r.top, bottom: r.bottom };
+        }),
+      );
+    check(
+      boxes.length === 2 &&
+        boxes.every((b, i) => i === 0 || b.top >= boxes[i - 1].bottom - 1),
+      `${width}: transport and native notices stack without overlap`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+      `${width}: native monitor notices do not overflow`,
+    );
+    const layout = await p.evaluate(() => {
+      const a = document
+          .querySelector(".workspace-notices")
+          .getBoundingClientRect(),
+        b = document.querySelector(".scope-bar").getBoundingClientRect(),
+        c = document
+          .querySelector(".workspace-overview")
+          .getBoundingClientRect();
+      return {
+        noticeBottom: a.bottom,
+        scopeTop: b.top,
+        scopeBottom: b.bottom,
+        overviewTop: c.top,
+      };
+    });
+    check(
+      layout.scopeTop >= layout.noticeBottom - 1 &&
+        layout.overviewTop >= layout.scopeBottom - 1,
+      `${width}: scope and overview keep their own rows beneath notices`,
+    );
+    if (process.env.IEUM_TEST_SCREENSHOTS) {
+      fs.mkdirSync(process.env.IEUM_TEST_SCREENSHOTS, { recursive: true });
+      await p.screenshot({
+        path: path.join(
+          process.env.IEUM_TEST_SCREENSHOTS,
+          `native-monitor-notices-${width}.png`,
+        ),
+        fullPage: true,
+      });
+    }
+
+    fail = false;
+    raw.host.native_monitor = {
+      status: "ready",
+      last_error: null,
+      events_read: 2,
+    };
+    await refresh(p);
+    await p.locator(".native-monitor-notice").waitFor({ state: "detached" });
+    check(
+      (await p.locator('.b-task-row[data-task-id="TASK-R"]').count()) === 1,
+      `${width}: native recovery clears its notice without changing task history`,
+    );
+    await p.close();
+  }
   check(
     report.errors.length === 0,
     "all regressions have zero browser exceptions",
