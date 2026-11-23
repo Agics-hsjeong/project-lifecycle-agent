@@ -7,6 +7,7 @@ export type Status =
   | "succeeded"
   | "awaiting_approval"
   | "awaiting_decision"
+  | "verification_unavailable"
   | "stale"
   | "failed"
   | "planned"
@@ -46,9 +47,20 @@ export type Gate = {
   [key: string]: any;
 };
 export type NativeMonitor = {
-  status: "ready" | "starting" | "unavailable" | "disabled";
+  status:
+    "ready" | "starting" | "waiting" | "unavailable" | "disabled" | "stopped";
   last_error?: string | null;
   events_read?: number;
+  error_code?:
+    | "access_denied"
+    | "source_invalid"
+    | "io_error"
+    | "state_error"
+    | "lock_timeout"
+    | null;
+  waiting_since?: string | null;
+  last_success_at?: string | null;
+  retry_seconds?: number | null;
 };
 export type Snapshot = {
   schema_version: number;
@@ -132,6 +144,7 @@ export const labels: Record<string, string> = {
   awaiting_approval: "판단 대기",
   awaiting_decision: "판단 대기",
   stale: "재검토 필요",
+  verification_unavailable: "현재 근거 확인 불가",
   skipped: "적용 제외",
   approved: "승인됨",
   pending: "검토 대기",
@@ -307,6 +320,8 @@ export function normalise(raw: any): Snapshot {
         "run_id",
         "step_id",
         "verification_status",
+        "verification_state",
+        "recorded_status",
         "access_status",
         "access_message",
         "ledger_status",
@@ -351,6 +366,7 @@ export function normalise(raw: any): Snapshot {
       !["host_hook", "codex_rollout"].includes(task.runtime_source)
     )
       throw new Error("스냅샷 실행 출처가 잘못되었습니다.");
+    verificationState(task);
     executionRef(task);
     if (task.verification != null) {
       fields(
@@ -475,11 +491,20 @@ export function normalise(raw: any): Snapshot {
     for (const step of list(run, "steps")) {
       fields(
         step,
-        ["id", "step_id", "task_id", "title", "status", "role"],
+        [
+          "id",
+          "step_id",
+          "task_id",
+          "title",
+          "status",
+          "role",
+          "verification_state",
+        ],
         [],
         ["attempts", "history_omitted"],
         ["valid", "superseded"],
       );
+      verificationState(step);
       for (const field of ["attempts", "history_omitted"])
         if (step[field] != null && !Number.isSafeInteger(step[field]))
           throw new Error("스냅샷 재시도 횟수 형식이 잘못되었습니다.");
@@ -592,6 +617,10 @@ export function normalise(raw: any): Snapshot {
           "attention",
           "applicable",
           "percent",
+          "verification_unavailable",
+          "recorded_completed",
+          "recorded_excluded",
+          "recorded_completion_percent",
         ],
       );
   const gates = list(raw, "gates");
@@ -738,11 +767,45 @@ export function normalise(raw: any): Snapshot {
     );
     if (raw.host.native_monitor != null) {
       const monitor = raw.host.native_monitor;
-      fields(monitor, ["status", "last_error"], [], ["events_read"]);
+      fields(
+        monitor,
+        [
+          "status",
+          "last_error",
+          "error_code",
+          "waiting_since",
+          "last_success_at",
+        ],
+        [],
+        ["events_read", "retry_seconds"],
+      );
       if (
-        !["ready", "starting", "unavailable", "disabled"].includes(
-          monitor.status,
+        ![
+          "ready",
+          "starting",
+          "waiting",
+          "unavailable",
+          "disabled",
+          "stopped",
+        ].includes(monitor.status) ||
+        (monitor.error_code != null &&
+          ![
+            "access_denied",
+            "source_invalid",
+            "io_error",
+            "state_error",
+            "lock_timeout",
+          ].includes(monitor.error_code)) ||
+        [monitor.waiting_since, monitor.last_success_at].some(
+          (stamp) =>
+            stamp != null &&
+            (stamp.length > 40 ||
+              !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/.test(
+                stamp,
+              ) ||
+              !Number.isFinite(Date.parse(stamp))),
         ) ||
+        (monitor.retry_seconds != null && monitor.retry_seconds > 60) ||
         (monitor.last_error != null && monitor.last_error.length > 280) ||
         (monitor.events_read != null &&
           (!Number.isInteger(monitor.events_read) ||
@@ -792,6 +855,15 @@ export function normalise(raw: any): Snapshot {
   };
 }
 
+function verificationState(row: any) {
+  if (
+    row.verification_state != null &&
+    !["valid", "changed", "unavailable", "pending"].includes(
+      row.verification_state,
+    )
+  )
+    throw new Error("스냅샷 현재 근거 확인 상태가 잘못되었습니다.");
+}
 /** Validate execution identities before using them to associate historical receipts. */
 function executionRef(row: any) {
   if (
@@ -854,7 +926,7 @@ export function hasIssue(task: Task, snapshot?: Snapshot) {
   if (active(task) || completed(task) || excluded(task)) return false;
   const command = commandsForTask(task, snapshot).at(-1);
   return (
-    ["failed", "stale"].includes(task.status) ||
+    ["failed", "stale", "verification_unavailable"].includes(task.status) ||
     command?.status === "failed" ||
     (!command &&
       (task.generation ?? 1) === 1 &&
@@ -873,10 +945,28 @@ export function taskSummary(tasks: Task[], snapshot?: Snapshot) {
   const omitted = tasks.filter(excluded).length;
   const applicable = tasks.length - omitted;
   const done = tasks.filter(completed).length;
+  const recordedDone = tasks.filter(
+    (task) =>
+      completed(task) || ["done", "succeeded"].includes(task.recorded_status),
+  ).length;
+  const recordedExcluded = tasks.filter(
+    (task) => excluded(task) || task.recorded_status === "skipped",
+  ).length;
+  const recordedApplicable = tasks.length - recordedExcluded;
   return {
     total: tasks.length,
     applicable,
     done,
+    recorded_done: recordedDone,
+    recorded_applicable: recordedApplicable,
+    recorded_percent: recordedApplicable
+      ? Math.round((recordedDone / recordedApplicable) * 100)
+      : null,
+    verification_unavailable: tasks.filter(
+      (task) =>
+        task.verification_state === "unavailable" ||
+        task.status === "verification_unavailable",
+    ).length,
     excluded: omitted,
     active: tasks.filter(active).length,
     attention: tasks.filter((t) => hasIssue(t, snapshot)).length,
@@ -886,6 +976,11 @@ export function taskSummary(tasks: Task[], snapshot?: Snapshot) {
 }
 export function verificationOf(task: Task) {
   const value = task.verification?.status || task.verification_status;
+  if (
+    task.verification_state === "unavailable" ||
+    task.status === "verification_unavailable"
+  )
+    return { state: "unavailable", label: "현재 근거 확인 불가" };
   if (excluded(task)) return { state: "excluded", label: "검증 집계 제외" };
   if (task.status === "stale")
     return { state: "unknown", label: "검증 기준 변경" };
@@ -957,7 +1052,7 @@ export function executionLabel(task: Task): string | null {
   if (
     completed(task) ||
     excluded(task) ||
-    ["stale", "failed"].includes(task.status)
+    ["stale", "failed", "verification_unavailable"].includes(task.status)
   )
     return null;
   if (

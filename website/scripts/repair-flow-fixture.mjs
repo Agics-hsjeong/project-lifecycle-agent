@@ -29,3 +29,40 @@ export function fixture(){
   ]}],
  };
 }
+
+/** Explicit request scope with QA and repair each bound to a separate execution. */
+export function multiRunFixture({ unavailable = false } = {}) {
+  const s = fixture();
+  const engineering = s.history_runs[0].steps.pop();
+  const run_id = "RUN-DEVELOPMENT";
+  s.tasks[1].run_id = run_id;
+  s.tasks[1].step_ref = { run_id, step_id: engineering.id };
+  for (const record of engineering.result_history)
+    record.id = record.id.replace("RUN-CURRENT", run_id);
+  s.history_runs.push({
+    id: run_id,
+    title: "독립 개발 수정 실행",
+    scope_id: run_id,
+    steps: [engineering],
+  });
+  s.current_scope = {
+    id: "REQUEST-SHIPPING",
+    source: "explicit",
+    title: "배송 경계 검증과 수정",
+    task_ids: ["TASK-QA", "TASK-DEV"],
+  };
+  if (unavailable) {
+    for (const task of s.tasks) {
+      task.status = "verification_unavailable";
+      task.recorded_status = "succeeded";
+      task.verification_state = "unavailable";
+      task.progress = null;
+    }
+    for (const run of s.history_runs)
+      for (const step of run.steps) {
+        step.valid = false;
+        step.verification_state = "unavailable";
+      }
+  }
+  return s;
+}

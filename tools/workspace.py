@@ -192,8 +192,8 @@ def gate_status(root, store, gate):
 
 def execution_path(root, relative):
     path = valid_artifact(root, relative)
-    parts = path.relative_to(root).parts
-    if parts[0] in {"registers", "inputs", "templates", "process", ".agents"} or relative in {"project.json", "HANDOFF.md", "AGENTS.md", "CLAUDE.md"} or parts[:2] == ("reports", "workspace-decisions"):
+    parts = tuple(part.casefold() for part in path.relative_to(root).parts)
+    if parts[0] in {"registers", "inputs", "templates", "process", ".agents"} or (len(parts) == 1 and parts[0] in {"project.json", "handoff.md", "agents.md", "claude.md"}) or parts[:2] == ("reports", "workspace-decisions"):
         raise ValueError("실행 작업자는 관리 기록·승인 근거·원본 입력을 수정할 수 없습니다.")
     return path
 
@@ -728,6 +728,21 @@ def _task_scope(root, data, store, tasks):
             "task_ids": list(tasks)}
 
 
+def receipt_verification(root, receipts):
+    """Check all exact receipt paths without exposing access errors publicly."""
+    if not receipts:
+        return "changed"
+    states = []
+    for relative, expected in receipts.items():
+        try:
+            states.append("valid" if file_hash(root, relative) == expected else "changed")
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            states.append("changed")
+        except OSError:
+            states.append("unavailable")
+    return runs._verification_merge(states)
+
+
 def task_records(root, data, tables, store, *, run_store=None, check_context=True):
     result = {}
     historical_titles = None
@@ -745,6 +760,7 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
         result[row["task_id"]] = {"id": row["task_id"], "title": title,
             "stage": stage, "phase": phase(stage), "stage_unassigned": "stage" not in meta, "role": meta.get("role", row["role"]), "owner": row["owner"],
             "status": {"done": "done", "doing": "running", "blocked": "blocked"}.get(row["status"], "todo"),
+            "recorded_status": row["status"],
             "requirement_ids": list(dict.fromkeys(starter.split_refs(row["requirement_ids"]) + meta.get("requirement_ids", []))), "depends_on": meta.get("depends_on", []),
             "artefact_ids": [], "start": meta.get("start"), "end": meta.get("end") or row["due_date"] or None,
             "parent_id": meta.get("parent_id"), "progress": 100 if row["status"] == "done" else None,
@@ -759,19 +775,12 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
                         and c["status"] == "completed" and c.get("receipt_hashes")]
             if receipts:
                 latest = max(enumerate(receipts), key=lambda item: (item[1].get("completed_at", ""), item[0]))[1]
-                changed = []
-                for relative, expected in latest["receipt_hashes"].items():
-                    try:
-                        current = file_hash(root, relative)
-                    except (ValueError, OSError):
-                        current = None
-                    if current != expected:
-                        changed.append(relative)
                 record = result[row["task_id"]]
-                record["receipt_valid"] = not changed
-                if changed:
-                    record.update(status="stale", progress=None,
-                                  blocked_reason="완료 근거가 변경되거나 삭제되었습니다: " + "; ".join(changed[:5]))
+                state = receipt_verification(root, latest["receipt_hashes"])
+                record.update(receipt_valid=state == "valid", verification_state=state)
+                if state != "valid":
+                    record.update(status="verification_unavailable" if state == "unavailable" else "stale", progress=None,
+                                  blocked_reason="현재 완료 근거를 확인할 수 없습니다." if state == "unavailable" else "완료 근거가 변경되거나 삭제되었습니다: " + "; ".join(list(latest["receipt_hashes"])[:5]))
     active_runs = runs.read(root) if run_store is None else run_store
     for run in active_runs["runs"]:
         mapping = {s["id"]: next((k for k, v in store["tasks"].items() if v.get("step_ref") == {"run_id": run["id"], "step_id": s["id"]}),
@@ -782,16 +791,18 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
             identifier = mapping[step["id"]]
             meta = store["tasks"].get(identifier, {})
             stage = meta.get("stage", data["current_stage"])
-            valid = runs.valid_step(root, run, step)
+            state = runs.verification_state(root, run, step)
+            valid = state == "valid"
             status = {"succeeded": "done", "skipped": "skipped", "running": "running", "failed": "failed",
                       "blocked": "blocked", "awaiting_decision": "awaiting_approval"}.get(step["status"], "todo")
             if step["status"] in {"succeeded", "skipped"} and not valid:
-                status = "stale"
+                status = "verification_unavailable" if state == "unavailable" else "stale"
             previous = result.get(identifier, {})
             result[identifier] = {**previous, "id": identifier, "title": meta["title"] if _meaningful_title(meta.get("title")) else step["title"],
                 "stage": stage, "phase": phase(stage), "stage_unassigned": "stage" not in meta,
                 "role": previous.get("role", meta.get("role", "")),
                 "owner": previous.get("owner", ""), "status": status,
+                "recorded_status": step["status"], "verification_state": state, "receipt_valid": valid,
                 "requirement_ids": list(dict.fromkeys(run["requirement_ids"] + previous.get("requirement_ids", []))),
                 "depends_on": list(dict.fromkeys([mapping[s] for s in step["depends_on"]] + meta.get("depends_on", []))),
                 "artefact_ids": [], "start": meta.get("start"), "end": meta.get("end"), "parent_id": meta.get("parent_id"),
@@ -821,17 +832,30 @@ def task_records(root, data, tables, store, *, run_store=None, check_context=Tru
         provenance = meta.get("artefact_revision")
         if provenance:
             receipts = provenance.get("receipt_hashes", {})
-            valid = bool(receipts) and all(file_hash(root, ref) == checksum for ref, checksum in receipts.items())
-            task.update(status="done" if valid else "stale", progress=100 if valid else None,
-                        receipt_valid=valid, artefact_revision=provenance)
+            state = receipt_verification(root, receipts)
+            valid = state == "valid"
+            task.update(status="done" if valid else ("verification_unavailable" if state == "unavailable" else "stale"), progress=100 if valid else None,
+                        receipt_valid=valid, verification_state=state, recorded_status="done", artefact_revision=provenance)
             task["evidence_refs"] = list(receipts)
-        if meta.get("invalidated_by") and task["status"] in {"done", "stale"}:
-            task.update(status="stale", progress=None, blocked_reason="승인 기준 수정에 따라 새 실행이 필요합니다.", receipt_valid=False)
+        if meta.get("invalidated_by") and task["status"] in {"done", "stale", "verification_unavailable"}:
+            task.update(status="stale", progress=None, blocked_reason="승인 기준 수정에 따라 새 실행이 필요합니다.", receipt_valid=False, verification_state="changed")
         if check_context and task["status"] == "done":
             completed = [c for c in store["queue"] if c["task_id"] == identifier and c["status"] == "completed"
                          and c.get("generation", 1) == meta.get("generation", 1)]
-            if completed and not provenance and not completion_context_valid(root, store, completed[-1], result):
-                task.update(status="stale", progress=None, blocked_reason="완료 당시 승인 기준이 변경되어 다시 실행해야 합니다.", receipt_valid=False)
+            if completed and not provenance:
+                try:
+                    state = "valid" if completion_context_valid(root, store, completed[-1], result) else "changed"
+                except (FileNotFoundError, NotADirectoryError, ValueError):
+                    state = "changed"
+                except OSError:
+                    state = "unavailable"
+                state = runs._verification_merge([task.get("verification_state", "valid"), state])
+                if state != "valid":
+                    task.update(status="verification_unavailable" if state == "unavailable" else "stale", progress=None,
+                                blocked_reason="현재 완료 근거를 확인할 수 없습니다." if state == "unavailable" else "완료 당시 승인 기준이 변경되어 다시 실행해야 합니다.",
+                                receipt_valid=False, verification_state=state)
+        task.setdefault("recorded_status", task["status"])
+        task.setdefault("verification_state", "pending")
     return result
 
 
@@ -875,9 +899,13 @@ def _artifact_reference(relative):
     if not isinstance(relative, str) or not relative or "\\" in relative or ":" in relative:
         raise ValueError("프로젝트 내부의 '/' 상대 경로가 필요합니다.")
     reference = Path(relative)
-    parts = reference.parts
+    parts = tuple(part.casefold() for part in reference.parts)
     if relative.startswith("/") or reference.is_absolute() or ".." in parts:
         raise ValueError("프로젝트 외부 경로는 허용하지 않습니다.")
+    # A normal directory suffix remains valid; interior/Windows aliases do not.
+    raw_parts = (relative[:-1] if relative.endswith("/") else relative).split("/")
+    if any(not part or part == "." or part != part.rstrip(" .") for part in raw_parts) or any(ord(char) < 32 or ord(char) == 127 for char in relative):
+        raise ValueError("모호한 경로 별칭은 허용하지 않습니다.")
     if is_sensitive_path(relative) or not parts or parts[0] == "state" or set(parts).intersection({".git", ".codex", ".claude", ".aws", ".ssh", ".gnupg", ".azure", ".netrc", ".npmrc", ".pypirc"}) or any(p.startswith(".env") for p in parts):
         raise ValueError("제어 기록·인증 자료는 관제 산출물로 열 수 없습니다.")
 
@@ -983,9 +1011,14 @@ def activity_matches_task(event, task, commands):
 def _summary_counts(tasks):
     values = list(tasks)
     counts = {"total": len(values), "completed": 0, "excluded": 0, "running": 0, "failed": 0,
-              "blocked": 0, "pending": 0, "waiting": 0, "stale": 0}
+              "blocked": 0, "pending": 0, "waiting": 0, "stale": 0,
+              "verification_unavailable": 0, "recorded_completed": 0, "recorded_excluded": 0}
     for task in values:
         status = task.get("status")
+        recorded = task.get("recorded_status", status)
+        if recorded in {"done", "succeeded"}: counts["recorded_completed"] += 1
+        elif recorded == "skipped": counts["recorded_excluded"] += 1
+        if task.get("verification_state") == "unavailable": counts["verification_unavailable"] += 1
         if status in {"done", "succeeded"}: counts["completed"] += 1
         elif status == "skipped": counts["excluded"] += 1
         elif status in {"running", "doing", "verifying"}:
@@ -997,11 +1030,14 @@ def _summary_counts(tasks):
         elif status == "failed": counts["failed"] += 1
         elif status == "blocked": counts["blocked"] += 1
         elif status == "stale": counts["stale"] += 1
+        elif status == "verification_unavailable": pass
         else:
             counts["waiting"] += 1
             if status not in {"awaiting_approval", "awaiting_decision"}: counts["pending"] += 1
     counts["applicable"] = counts["total"]-counts["excluded"]
     counts["completion_percent"] = round(counts["completed"] / counts["applicable"] * 100) if counts["applicable"] else None
+    recorded_applicable = counts["total"] - counts["recorded_excluded"]
+    counts["recorded_completion_percent"] = round(counts["recorded_completed"] / recorded_applicable * 100) if recorded_applicable else None
     return counts
 
 
@@ -1009,6 +1045,10 @@ def _verification_for_task(task, commands):
     if task.get("status") == "stale":
         return {"mode": (task.get("execution") or {}).get("verification_mode", "execute"), "status": "stale", "checks": 0, "source": None}
     latest = commands[-1] if commands else {}
+    if latest.get("verification_summary", {}).get("status") == "failed":
+        return dict(latest["verification_summary"])
+    if task.get("verification_state") == "unavailable":
+        return {"mode": (task.get("execution") or {}).get("verification_mode", "execute"), "status": "unavailable", "checks": 0, "source": None}
     if latest.get("verification_summary"):
         return dict(latest["verification_summary"])
     return {"mode": (task.get("execution") or {}).get("verification_mode", "execute"),
@@ -1190,9 +1230,12 @@ def snapshot(folder):
         for run in run_store["runs"] if run["id"] not in declared_runs] + store["execution_scopes"]
     from tools.attempt_history import project_steps
     attempt_history = project_steps(run_store["runs"], result["tasks"], lifecycle.events(root))
+    step_verification = {(run["id"], step["id"]): runs.verification_state(root, run, step)
+                         for run in run_store["runs"] for step in run["steps"]}
     result["history_runs"] = [{"id": run["id"], "title": run["title"], "scope_id": run.get("scope_id", run["id"]),
         "steps": [{"id": step["id"], "title": step["title"], "status": step["status"],
-                   "valid": runs.valid_step(root, run, step), "inputs": step["inputs"],
+                   "valid": step_verification[(run["id"], step["id"])] == "valid",
+                   "verification_state": step_verification[(run["id"], step["id"])], "inputs": step["inputs"],
                    "expected_outputs": step.get("expected_outputs", []), "receipt_hashes": step.get("receipt_hashes", {}),
                    "superseded": run["id"] + "/" + step["id"] in store["superseded_steps"],
                    **attempt_history[(run["id"], step["id"])]}

@@ -668,7 +668,8 @@ function WorkspaceContent({
         : currentRunner
           ? `${runnerProvider} · ${runnerStates[currentRunner.status] || currentRunner.status}`
           : "자동 실행기 미연결";
-  const progress = counts.percent;
+  const recordedProgress = counts.verification_unavailable > 0;
+  const progress = recordedProgress ? counts.recorded_percent : counts.percent;
   const cliMode =
     snapshot?.host?.execution_mode === "cli" ||
     snapshot?.host?.execution_mode === "mixed" ||
@@ -1043,6 +1044,23 @@ function WorkspaceContent({
               </div>
             </div>
           )}
+          {mode === "local" && nativeMonitor?.status === "waiting" && (
+            <div
+              className="native-monitor-waiting"
+              role="status"
+              aria-live="polite"
+              data-native-monitor-state="waiting"
+            >
+              <Icon name="info" size={17} />
+              <div>
+                <strong>기록 동기화 대기</strong>
+                <p>
+                  프로젝트 기록 작업이 끝나면 자동으로 이어 받습니다. 마지막
+                  수신 상태를 유지합니다.
+                </p>
+              </div>
+            </div>
+          )}
           {nativeMonitorUnavailable && (
             <div
               className="native-monitor-notice"
@@ -1104,13 +1122,20 @@ function WorkspaceContent({
           </div>
           <div
             className="overall-progress"
-            aria-label={`현재 범위 적용 대상 ${counts.applicable}개 중 ${done}개 완료 · 적용 제외 ${counts.excluded}개`}
+            data-progress-basis={recordedProgress ? "recorded" : "current"}
+            aria-label={
+              recordedProgress
+                ? `실행 기록 ${counts.recorded_done}개 완료 · 현재 근거 확인 불가 ${counts.verification_unavailable}건 · 현재 검증 확인 ${done}개`
+                : `현재 범위 적용 대상 ${counts.applicable}개 중 ${done}개 완료 · 적용 제외 ${counts.excluded}개`
+            }
           >
             <div>
               <strong>
-                {counts.applicable
-                  ? `현재 범위 ${done} / ${counts.applicable} 완료`
-                  : "적용 대상 없음"}
+                {recordedProgress
+                  ? `실행 기록 ${counts.recorded_done} / ${counts.recorded_applicable} 완료`
+                  : counts.applicable
+                    ? `현재 범위 ${done} / ${counts.applicable} 완료`
+                    : "적용 대상 없음"}
               </strong>
               <b>
                 {progress == null ? "—" : progress}
@@ -1120,13 +1145,28 @@ function WorkspaceContent({
             {progress != null && (
               <div
                 role="progressbar"
-                aria-label="현재 범위 적용 대상 작업 완료 비율"
+                aria-label={
+                  recordedProgress
+                    ? "실행 기록 기준 작업 완료 비율 · 현재 검증과 별개"
+                    : "현재 범위 적용 대상 작업 완료 비율"
+                }
                 aria-valuenow={progress}
                 aria-valuemin={0}
                 aria-valuemax={100}
               >
-                <i style={{ width: `${progress}%` }} />
+                <i
+                  style={{
+                    width: `${progress}%`,
+                    background: recordedProgress ? "#647c89" : undefined,
+                  }}
+                />
               </div>
+            )}
+            {recordedProgress && (
+              <small className="progress-verification-note">
+                현재 근거 확인 불가 {counts.verification_unavailable}건 · 현재
+                검증 확인 {done} / {counts.applicable}
+              </small>
             )}
             <small>
               <span>{counts.active} 진행 중</span>
@@ -1193,7 +1233,9 @@ function WorkspaceContent({
           <p>
             {progress == null
               ? "적용 대상 작업 없음"
-              : "작업 개수 기준 완료율 · 공수·일정·품질 진척률이 아닙니다."}
+              : recordedProgress
+                ? "실행 완료 기록 기준 비율 · 파일 접근 복구 후 현재 검증 근거를 다시 확인합니다."
+                : "작업 개수 기준 완료율 · 공수·일정·품질 진척률이 아닙니다."}
           </p>
         </div>
       </div>

@@ -17,13 +17,19 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from tools import native_observation as observation
-from tools.storage import atomic_write, confined, lock
+from tools.storage import (ObservationTurnBusy, ObservationTurnStopped, ProjectBusyError,
+                           atomic_write, confined, lock, observation_turn)
 
 SESSION = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\Z")
 TOKEN = re.compile(r"(?:ieum[-_]|IEUM_BIND:)([0-9a-f]{24})(?![0-9a-f])")
 MAX_LINE = 1024 * 1024
 MAX_BATCH = 256
 _POLL_LOCK = threading.Lock()
+MONITOR_LOCK_GRACE = 1.5
+MONITOR_RETRY_INTERVAL = 0.02
+MONITOR_POLL_INTERVAL = 0.75
+MONITOR_BUSY_WARNING = 15.0
+POLL_ERRORS = (ValueError, OSError, TypeError, KeyError, RecursionError)
 
 
 def _sessions_root():
@@ -226,26 +232,117 @@ def poll_sources(project):
         return 0
     try:
         data = observation._read(observation._root(project))
-        return sum(poll_one(project, key) for key in data["cursors"] if key.startswith("codex:") and data["cursors"][key].get("file_id"))
+        count, errors = 0, []
+        for key, cursor in data["cursors"].items():
+            if not key.startswith("codex:") or not cursor.get("file_id"):
+                continue
+            try:
+                count += poll_one(project, key)
+            except POLL_ERRORS as exc:
+                # An inaccessible historical source must not starve a healthy
+                # current source. Surface the fault after independent work.
+                errors.append(exc)
+        if errors:
+            serious = [exc for exc in errors if not _monitor_busy(project, exc)]
+            raise (serious or errors)[0]
+        return count
     finally:
         _POLL_LOCK.release()
 
 
+def _monitor_busy(project, exc):
+    """Recognize exact managed lock conflicts, never general ValueErrors."""
+    from tools.native_inbox import InboxBusyError, LOCK_FILE
+    if not isinstance(exc, (ProjectBusyError, InboxBusyError, ObservationTurnBusy)):
+        return False
+    try:
+        root = Path(project).resolve()
+        if isinstance(exc, ObservationTurnBusy):
+            return exc.root == root
+        if isinstance(exc, InboxBusyError):
+            return exc.lock_path == (root / LOCK_FILE).absolute() and isinstance(exc.__cause__, OSError)
+        cause = exc.__cause__
+        return (isinstance(cause, FileExistsError) and cause.filename is not None
+                and Path(cause.filename).absolute() == (root / "state/write.lock").absolute())
+    except OSError:
+        # Error classification must not re-query an inaccessible project and
+        # kill the monitor while it is already reporting a real ACL failure.
+        return False
+
+
+class _MonitorStopped(Exception):
+    pass
+
+
+def _monitor_operation(project, operation, stop):
+    """Allow ordinary reader/writer contention to clear, bounded and stoppable."""
+    deadline = time.monotonic() + MONITOR_LOCK_GRACE
+    try:
+        with observation_turn(project, stop=stop, timeout=MONITOR_LOCK_GRACE):
+            while True:
+                try:
+                    return operation(project)
+                except POLL_ERRORS as exc:
+                    remaining = deadline - time.monotonic()
+                    if not _monitor_busy(project, exc) or remaining <= 0:
+                        raise
+                    if stop.wait(min(MONITOR_RETRY_INTERVAL, remaining)):
+                        raise _MonitorStopped() from None
+    except ObservationTurnStopped:
+        raise _MonitorStopped() from None
+
+
+def _monitor_error_code(exc):
+    if isinstance(exc, PermissionError):
+        return "access_denied"
+    if isinstance(exc, OSError):
+        return "io_error"
+    if isinstance(exc, (json.JSONDecodeError, TypeError, KeyError, RecursionError)):
+        return "source_invalid"
+    return "state_error"
+
+
 def monitor(project, stop, health=None):
     from tools.native_inbox import drain
+    waiting_since = None
+    waiting_at = None
+    last_success = None
     while not stop.is_set():
-        count, unavailable = 0, False
+        count, errors = 0, []
         for operation in (drain, poll_sources):
             try:
-                count += operation(project)
-            except (ValueError, OSError, TypeError, KeyError, RecursionError):
-                # One damaged queued event must not stop another source.
-                unavailable = True
+                count += _monitor_operation(project, operation, stop)
+            except _MonitorStopped:
+                break
+            except POLL_ERRORS as exc:
+                errors.append(exc)
+        if stop.is_set():
+            break
+        serious = [exc for exc in errors if not _monitor_busy(project, exc)]
+        if serious:
+            status, error = "unavailable", "네이티브 실행 기록 연결을 확인하세요. 보관된 이벤트는 유지합니다."
+            code = _monitor_error_code(serious[0])
+            waiting_since = waiting_at = None
+        elif errors:
+            if waiting_at is None:
+                waiting_at, waiting_since = time.monotonic(), observation._now()
+            delayed = time.monotonic() - waiting_at >= MONITOR_BUSY_WARNING
+            status = "unavailable" if delayed else "waiting"
+            error = "네이티브 기록 동기화가 지연됩니다. 프로젝트 기록 작업을 확인하세요. 보관된 이벤트는 유지합니다." if delayed else None
+            code = "lock_timeout" if delayed else None
+        else:
+            status, error, code = "ready", None, None
+            last_success = observation._now()
+            waiting_since = waiting_at = None
         if health is not None:
-            health.update(status="unavailable" if unavailable else "ready",
-                last_error="네이티브 실행 기록 연결을 확인하세요. 보관된 이벤트는 유지합니다." if unavailable else None,
-                events_read=count)
-        stop.wait(0.75)
+            health.update(status=status, last_error=error, error_code=code,
+                events_read=count, last_success_at=last_success,
+                waiting_since=waiting_since,
+                retry_seconds=MONITOR_POLL_INTERVAL if errors and not serious else None)
+        if stop.wait(MONITOR_POLL_INTERVAL):
+            break
+    if health is not None:
+        health.update(status="stopped", retry_seconds=None, waiting_since=None)
 
 
 def repair_access(project):

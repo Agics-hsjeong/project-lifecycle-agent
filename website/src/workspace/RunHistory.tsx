@@ -51,7 +51,12 @@ export function RunHistory({ runs }: { runs: any[] }) {
                   )}
                 </span>
                 <strong>
-                  {step.valid === false ? "기준 변경 · " : ""}
+                  {step.verification_state === "unavailable"
+                    ? "현재 근거 확인 불가 · 기록상 "
+                    : step.verification_state === "changed" ||
+                        (step.valid === false && !step.verification_state)
+                      ? "기준 변경 · "
+                      : ""}
                   {labels[step.status] || step.status || "상태 미보고"}
                 </strong>
                 {(step.result_history || []).length > 0 && (

@@ -1,7 +1,9 @@
 """Confined, serialized project writes with rollback and crash recovery."""
 import base64
 import errno
+import math
 from contextlib import contextmanager
+from collections import deque
 import hashlib
 import json
 import os
@@ -11,9 +13,107 @@ from pathlib import Path, PureWindowsPath
 import tempfile
 import threading
 import time
+import weakref
 from functools import wraps
 
 _OWNED = threading.local()
+
+
+class ProjectBusyError(ValueError):
+    """Another engine operation holds this exact managed project lock."""
+
+
+class ObservationTurnBusy(ValueError):
+    """The bounded local observation queue is busy, not disconnected."""
+
+    status = 409
+
+    def __init__(self, root):
+        super().__init__("관제 기록 동기화 순서를 기다립니다. 잠시 후 다시 시도하세요.")
+        self.root = root
+
+
+class ObservationTurnStopped(Exception):
+    """An observation waiter was cancelled before owning its local turn."""
+
+
+class _ObservationTurn:
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.queue = deque()
+        self.owner = None
+        self.depth = 0
+
+
+_TURN_REGISTRY_LOCK = threading.Lock()
+_TURN_REGISTRY = weakref.WeakValueDictionary()
+
+
+def _reset_observation_turns():
+    global _TURN_REGISTRY_LOCK, _TURN_REGISTRY
+    _TURN_REGISTRY_LOCK = threading.Lock()
+    _TURN_REGISTRY = weakref.WeakValueDictionary()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_observation_turns)
+
+
+@contextmanager
+def observation_turn(folder, *, stop=None, timeout=1.5):
+    """Give local HTTP reads and the collector fair turns for one project.
+
+    This queue neither replaces the cross-process engine lock nor caches data.
+    A holder may reenter. A caller already holding the real engine lock skips
+    the queue, avoiding inversion with a queued observer waiting for that lock.
+    Cancellation/timeouts remove only their own in-memory ticket.
+    """
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+        raise ValueError("관제 동기화 대기 시간은 유한한 0 이상의 값이어야 합니다.")
+    root = Path(folder).resolve()
+    if stop is not None and stop.is_set():
+        raise ObservationTurnStopped()
+    if root in getattr(_OWNED, "roots", set()):
+        yield
+        return
+    with _TURN_REGISTRY_LOCK:
+        turn = _TURN_REGISTRY.get(root)
+        if turn is None:
+            turn = _ObservationTurn()
+            _TURN_REGISTRY[root] = turn
+    identity = threading.get_ident()
+    deadline = time.monotonic() + timeout
+    with turn.condition:
+        if turn.owner == identity:
+            turn.depth += 1
+        else:
+            ticket = object()
+            turn.queue.append(ticket)
+            try:
+                while turn.owner is not None or turn.queue[0] is not ticket:
+                    if stop is not None and stop.is_set():
+                        raise ObservationTurnStopped()
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise ObservationTurnBusy(root)
+                    turn.condition.wait(min(.02, remaining))
+                if stop is not None and stop.is_set():
+                    raise ObservationTurnStopped()
+                turn.queue.popleft()
+                turn.owner, turn.depth = identity, 1
+            except BaseException:
+                turn.queue.remove(ticket)
+                turn.condition.notify_all()
+                raise
+    try:
+        yield
+    finally:
+        with turn.condition:
+            turn.depth -= 1
+            if turn.depth == 0:
+                turn.owner = None
+                turn.condition.notify_all()
+
 
 
 def consistent_read(function):
@@ -179,7 +279,7 @@ def lock(root, *, recovering=False):
                     raise
                 time.sleep(0.01)
     except FileExistsError as exc:
-        raise ValueError("다른 쓰기 작업의 잠금이 있습니다. 종료 여부를 확인한 뒤 recover를 사용하세요.") from exc
+        raise ProjectBusyError("다른 쓰기 작업의 잠금이 있습니다. 종료 여부를 확인한 뒤 recover를 사용하세요.") from exc
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump({"pid": os.getpid()}, handle)
     try:

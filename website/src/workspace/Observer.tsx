@@ -283,6 +283,11 @@ export function ActivityFeed({
   );
 }
 function taskNote(task: Task, snapshot: Snapshot, latest?: Activity) {
+  if (
+    task.verification_state === "unavailable" ||
+    task.status === "verification_unavailable"
+  )
+    return "실행 완료 기록은 보존했습니다. 현재 파일에 접근할 수 없어 검증 근거를 다시 확인하지 못했습니다.";
   if (executionLabel(task)) return executionLabel(task);
   if (latest && active(task)) return latest.summary;
   if (active(task))
@@ -377,6 +382,11 @@ function taskHasIssue(task: Task, snapshot: Snapshot) {
 }
 
 export function statusText(task: Task, live: boolean, snapshot: Snapshot) {
+  if (
+    task.verification_state === "unavailable" ||
+    task.status === "verification_unavailable"
+  )
+    return "현재 근거 확인 불가";
   if (executionLabel(task)) return executionLabel(task);
   if (active(task)) return live ? "진행 중" : "활동 확인 필요";
   if (task.status !== "stale" && taskHasIssue(task, snapshot))

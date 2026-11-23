@@ -13,7 +13,7 @@ import unittest
 from unittest.mock import patch
 
 from tools import native_inbox as inbox, native_observation as native, starter
-from tools.storage import confined, json_bytes, lock
+from tools.storage import ProjectBusyError, confined, json_bytes, lock
 
 
 class NativeInboxTests(unittest.TestCase):
@@ -43,7 +43,7 @@ class NativeInboxTests(unittest.TestCase):
         end = self.event("event-2", "agent_completed", at="2026-11-22T00:00:02+00:00")
         path = inbox.enqueue(self.root, "claude", end)
         self.assertTrue(path.is_file())
-        with self.assertRaises(ValueError):
+        with self.assertRaises(ProjectBusyError):
             inbox.drain(self.root)
         self.assertTrue(path.is_file())
         thread.join(5)

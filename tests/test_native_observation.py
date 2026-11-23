@@ -37,6 +37,20 @@ class NativeObservationTests(unittest.TestCase):
     def task(self, identifier="TASK-001"):
         return next(t for t in workspace.snapshot(self.root)["tasks"] if t["id"] == identifier)
 
+    def test_plan_only_delegation_prepares_only_exact_bound_output_parents(self):
+        runs.create(self.root, {"expected_revision": workspace.revision(self.root),
+            "key": "plan-only-parents", "title": "Native planned outputs", "requirement_ids": ["REQ-001"],
+            "bindings": {"STEP-001": "TASK-001", "STEP-002": "TASK-002"}, "steps": [
+                {"id": "STEP-001", "title": "API task", "inputs": ["input.txt"], "depends_on": [],
+                 "expected_outputs": ["generated/backend/report.md"]},
+                {"id": "STEP-002", "title": "QA task", "inputs": ["input.txt"], "depends_on": [],
+                 "expected_outputs": ["generated/qa/findings.md"]}]})
+        self.assertNotIn("execution", workspace.read(self.root)["tasks"]["TASK-001"])
+        self.ticket()
+        self.assertTrue((self.root / "generated/backend").is_dir())
+        self.assertFalse((self.root / "generated/qa").exists())
+        self.assertFalse((self.root / "generated/backend/report.md").exists())
+
     def test_ticket_pre_agent_start_stop_post_agent_keeps_terminal_worker_and_call(self):
         ticket = self.ticket()
         self.event("delegation_started", call_id="call-1", delegation_token=ticket["token"], native_type="ieum-backend")

@@ -1,6 +1,7 @@
 """Durable, metadata-only hook inbox independent of the business-state lock."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import errno
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ import time
 
 from tools import native_observation as observation
 from tools.sensitive_data import redact_text
-from tools.storage import atomic_write, confined, json_bytes
+from tools.storage import ProjectBusyError, atomic_write, confined, json_bytes
 
 DIRECTORY = "state/native-inbox"
 LOCK_FILE = "state/native-inbox.lock"
@@ -22,6 +23,14 @@ ALLOWED = {"event_id", "kind", "session_id", "native_agent_id", "role", "task_id
 REQUIRED = {"event_id", "kind", "session_id", "source", "at"}
 DIGEST_NAME = re.compile(r"[0-9a-f]{64}\.json\Z")
 ERROR = "네이티브 관측 보관함에 처리하지 못한 이벤트가 있습니다. 원본은 보존했습니다."
+
+
+class InboxBusyError(ValueError):
+    """The exact inbox OS lock is busy; queued events remain durable."""
+
+    def __init__(self, path):
+        super().__init__("네이티브 관측 보관함이 사용 중입니다. 자동으로 다시 수신합니다.")
+        self.lock_path = Path(path).absolute()
 
 
 def _normalise(provider, event):
@@ -86,9 +95,13 @@ def _inbox_lock(root):
                     os.lseek(fd, 0, os.SEEK_SET)
                     os.write(fd, b"0")
                 break
-            except (BlockingIOError, OSError):
+            except OSError as exc:
+                # This fd was already opened successfully. Retry only an OS
+                # byte-range/flock conflict, never unrelated I/O or ACL errors.
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK} and getattr(exc, "winerror", None) not in {33}:
+                    raise
                 if time.monotonic() >= deadline:
-                    raise ValueError("네이티브 관측 보관함이 사용 중입니다. 다시 연결하세요.") from None
+                    raise InboxBusyError(path) from exc
                 time.sleep(0.01)
         yield
     finally:
@@ -169,6 +182,7 @@ def drain(project, max_events=32):
         folder = _directory(root)
         paths = _files(root, folder)
     pending, failed = [], False
+    busy = None
     for path in paths:
         try:
             if not DIGEST_NAME.fullmatch(path.name):
@@ -204,8 +218,14 @@ def drain(project, max_events=32):
                         raise ValueError(ERROR)
                     safe.unlink()
             consumed += 1
+        except (ProjectBusyError, InboxBusyError) as exc:
+            # Preserve contention as contention. Do not acknowledge this record
+            # or call it corrupt; a retry replays its immutable event ID safely.
+            busy = exc
         except (ValueError, OSError, TypeError, KeyError, RecursionError):
             failed = True
     if failed:
         raise ValueError(ERROR)
+    if busy is not None:
+        raise busy
     return consumed

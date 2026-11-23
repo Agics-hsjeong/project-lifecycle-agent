@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import webbrowser
 
 from tools import starter, workspace
-from tools.storage import confined, json_bytes
+from tools.storage import confined, json_bytes, observation_turn
 
 MAX_BODY = 256 * 1024
 DEFAULT_ASSETS = Path(__file__).resolve().parent / "workspace_ui"
@@ -31,17 +31,18 @@ def _read_with_lock_grace(folder, operation, timeout=1.5, interval=0.04):
     """
     lock_path = Path(folder).resolve() / "state/write.lock"
     deadline = time.monotonic() + timeout
-    while True:
-        try:
-            return operation()
-        except ValueError as exc:
-            cause = exc.__cause__
-            if not isinstance(cause, FileExistsError) or not cause.filename or Path(cause.filename).resolve() != lock_path:
-                raise
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise
-            time.sleep(min(interval, remaining))
+    with observation_turn(folder, timeout=timeout):
+        while True:
+            try:
+                return operation()
+            except ValueError as exc:
+                cause = exc.__cause__
+                if not isinstance(cause, FileExistsError) or not cause.filename or Path(cause.filename).resolve() != lock_path:
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(interval, remaining))
 
 
 def _set_supervisor(server, **fields):

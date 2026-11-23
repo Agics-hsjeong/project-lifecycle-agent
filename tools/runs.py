@@ -43,22 +43,60 @@ def hashes(root, refs):
     return result
 
 
-def unchanged(root, step):
-    if step["status"] not in {"succeeded", "skipped"}:
-        return False
+def _verification_merge(states):
+    """A proven mismatch wins over an unreadable file; neither is valid."""
+    values = set(states)
+    return next((state for state in ("changed", "unavailable", "pending") if state in values), "valid")
+
+
+def _hash_verification(root, refs, expected):
     try:
-        return hashes(root, step["inputs"]) == step.get("input_hashes") and hashes(root, list(step["receipt_hashes"])) == step["receipt_hashes"]
-    except (ValueError, OSError):
-        return False
+        # Retain the complete collection/size/path constraints used by gates.
+        return "valid" if hashes(root, refs) == expected else "changed"
+    except (FileNotFoundError, NotADirectoryError, ValueError):
+        return "changed"
+    except OSError:
+        states = ["unavailable"]
+    # An inaccessible file must not hide a demonstrable mismatch elsewhere.
+    for ref in refs:
+        try:
+            current = hashes(root, [ref])
+            if not isinstance(expected, dict) or any(
+                    relative not in expected or checksum != expected[relative]
+                    for relative, checksum in current.items()):
+                states.append("changed")
+        except (FileNotFoundError, NotADirectoryError, ValueError):
+            states.append("changed")
+        except OSError:
+            pass
+    return _verification_merge(states)
+
+
+def verification_state(root, run, step, visited=None):
+    """Read-only current evidence state; never substitutes a recorded receipt."""
+    visited = set() if visited is None else visited
+    if step["id"] in visited:
+        return "changed"
+    if step["status"] not in {"succeeded", "skipped"}:
+        return "pending"
+    states = [_hash_verification(root, step["inputs"], step.get("input_hashes")),
+              _hash_verification(root, list(step["receipt_hashes"]), step["receipt_hashes"])]
+    parents = {s["id"]: s for s in run["steps"]}
+    for identifier in step["depends_on"]:
+        states.append(verification_state(root, run, parents[identifier], visited | {step["id"]})
+                      if identifier in parents else "changed")
+    return _verification_merge(states)
+
+
+def unchanged(root, step):
+    return (step["status"] in {"succeeded", "skipped"}
+            and _verification_merge([
+                _hash_verification(root, step["inputs"], step.get("input_hashes")),
+                _hash_verification(root, list(step["receipt_hashes"]), step["receipt_hashes"])]) == "valid")
 
 
 def valid_step(root, run, step, visited=None):
-    visited = set() if visited is None else visited
-    if step["id"] in visited or not unchanged(root, step):
-        return False
-    visited = visited | {step["id"]}
-    parents = [s for s in run["steps"] if s["id"] in step["depends_on"]]
-    return all(valid_step(root, run, parent, visited) for parent in parents)
+    return verification_state(root, run, step, visited) == "valid"
 
 
 def require_revision(root, payload):
@@ -212,6 +250,9 @@ def result(folder, payload, actor="agent"):
             raise ValueError("선행 작업의 결과가 없거나 변경되었습니다.")
         if step["status"] in {"succeeded", "skipped"} and valid_step(root, run, step):
             raise ValueError("완료 작업을 중복 실행하지 않습니다. 새 변경은 새 실행으로 계획하세요.")
+        if status != "running":
+            from tools.output_publication import publish_outputs
+            publish_outputs(root, run, step, payload["evidence_refs"])
         receipts = hashes(root, payload["evidence_refs"])
         if status == "running":
             if step["status"] == "running":
@@ -250,10 +291,12 @@ def inspect(folder, run_id=None):
             continue
         steps = []
         for step in run["steps"]:
-            valid = valid_step(root, run, step)
+            state = verification_state(root, run, step)
+            valid = state == "valid"
             deps_valid = all(valid_step(root, run, s) for s in run["steps"] if s["id"] in step["depends_on"])
-            steps.append({**step, "valid": valid, "ready_to_start": deps_valid and step["status"] != "running" and not valid,
-                          "effective_status": "stale" if step["status"] in {"succeeded", "skipped"} and not valid else step["status"]})
+            steps.append({**step, "valid": valid, "verification_state": state, "ready_to_start": deps_valid and step["status"] != "running" and not valid and state != "unavailable",
+                          "effective_status": ("verification_unavailable" if state == "unavailable" else "stale")
+                          if step["status"] in {"succeeded", "skipped"} and not valid else step["status"]})
         output.append({**run, "steps": steps, "complete": all(s["valid"] for s in steps)})
     if run_id is not None and not output:
         raise ValueError("없는 실행 ID입니다.")

@@ -138,7 +138,7 @@ export function makeDemo(): Snapshot {
       name: "고객 포털 구축",
       current_stage: "planning",
       profile: "si",
-      version: "2.0.0-beta.9",
+      version: "2.0.0-beta.10",
     },
     phases: PHASES,
     tasks,

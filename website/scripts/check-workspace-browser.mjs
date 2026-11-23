@@ -2,7 +2,10 @@
 import fs from "node:fs";
 import path from "node:path";
 import assert from "node:assert/strict";
-import { fixture as repairFixture } from "./repair-flow-fixture.mjs";
+import {
+  fixture as repairFixture,
+  multiRunFixture,
+} from "./repair-flow-fixture.mjs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 const website = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -1443,12 +1446,42 @@ try {
 
     fail = false;
     raw.host.native_monitor = {
+      status: "waiting",
+      last_error: null,
+      error_code: null,
+      waiting_since: "2026-11-23T04:00:01+00:00",
+      last_success_at: "2026-11-23T04:00:00+00:00",
+      retry_seconds: 0.75,
+      events_read: 0,
+    };
+    await refresh(p);
+    await p.locator(".native-monitor-waiting").waitFor();
+    check(
+      (await p.locator(".native-monitor-notice").count()) === 0,
+      `${width}: lock wait does not show connection failure warning`,
+    );
+    check(
+      (await p.locator(".native-monitor-waiting").innerText()).includes(
+        "기록 동기화 대기",
+      ),
+      `${width}: long lock wait is explicit and neutral`,
+    );
+    check(
+      (await p.locator('.b-task-row[data-task-id="TASK-R"]').count()) === 1,
+      `${width}: wait retains current task history`,
+    );
+    raw.host.native_monitor = {
       status: "ready",
       last_error: null,
       events_read: 2,
     };
     await refresh(p);
     await p.locator(".native-monitor-notice").waitFor({ state: "detached" });
+    await p.locator(".native-monitor-waiting").waitFor({ state: "detached" });
+    check(
+      (await p.locator(".native-monitor-waiting").count()) === 0,
+      `${width}: recovered collector clears neutral wait notice`,
+    );
     check(
       (await p.locator('.b-task-row[data-task-id="TASK-R"]').count()) === 1,
       `${width}: native recovery clears its notice without changing task history`,
@@ -1548,56 +1581,247 @@ try {
   // Synthetic feedback states stay isolated from the actual-project browser QA.
   for (const width of [1440, 390, 320]) {
     let raw = repairFixture();
-    const mark = (phase) => { raw.revision = `synthetic-repair-${phase}`; raw.captured_at = new Date().toISOString(); };
+    const mark = (phase) => {
+      raw.revision = `synthetic-repair-${phase}`;
+      raw.captured_at = new Date().toISOString();
+    };
     const initialFailed = () => {
       raw = repairFixture();
-      raw.history_runs[0].steps[0].result_history = raw.history_runs[0].steps[0].result_history.slice(0, 2);
+      raw.history_runs[0].steps[0].result_history =
+        raw.history_runs[0].steps[0].result_history.slice(0, 2);
       raw.history_runs[0].steps[0].status = "failed";
       raw.history_runs[0].steps[0].valid = false;
       raw.history_runs[0].steps[0].attempts = 1;
       raw.history_runs[0].steps[1].result_history = [];
       raw.history_runs[0].steps[1].status = "planned";
       raw.history_runs[0].steps[1].valid = false;
-      raw.tasks[0].status = "failed"; raw.tasks[1].status = "todo";
+      raw.tasks[0].status = "failed";
+      raw.tasks[1].status = "todo";
       mark("initial-failed");
     };
     initialFailed();
-    const p = await pageFor((route) => route.fulfill({ json: raw }), undefined, false, width);
-    const section = p.locator('.repair-flow');
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
+    const section = p.locator(".repair-flow");
     await section.locator('[data-repair-state="failed"]').waitFor();
-    check((await section.innerText()).includes("True 수량"), `${width}: failure reason visible without opening details`);
-    check(await section.locator('[data-repair-kind="failure"]').count() === 1, `${width}: initial failure survives as a recorded stage`);
-    check(await p.locator('.inspector').count() === 0, `${width}: feedback overview needs no inspector`);
+    check(
+      (await section.innerText()).includes("True 수량"),
+      `${width}: failure reason visible without opening details`,
+    );
+    check(
+      (await section.locator('[data-repair-kind="failure"]').count()) === 1,
+      `${width}: initial failure survives as a recorded stage`,
+    );
+    check(
+      (await p.locator(".inspector").count()) === 0,
+      `${width}: feedback overview needs no inspector`,
+    );
 
-    raw.history_runs[0].steps[1].result_history = repairFixture().history_runs[0].steps[1].result_history.slice(0, 1);
-    raw.history_runs[0].steps[1].status = "running"; raw.tasks[1].status = "running";mark("repair-running");
-    await refresh(p);await section.locator('[data-repair-kind="repair"][data-recorded-status="running"]').waitFor();
-    check(await section.locator('[data-repair-state="running"]').count() === 1, `${width}: actual current repair uses the running outcome tone`);
-    check(await section.locator('[data-repair-kind="failure"]').count() === 1, `${width}: repair does not erase initial failure`);
+    raw.history_runs[0].steps[1].result_history =
+      repairFixture().history_runs[0].steps[1].result_history.slice(0, 1);
+    raw.history_runs[0].steps[1].status = "running";
+    raw.tasks[1].status = "running";
+    mark("repair-running");
+    await refresh(p);
+    await section
+      .locator('[data-repair-kind="repair"][data-recorded-status="running"]')
+      .waitFor();
+    check(
+      (await section.locator('[data-repair-state="running"]').count()) === 1,
+      `${width}: actual current repair uses the running outcome tone`,
+    );
+    check(
+      (await section.locator('[data-repair-kind="failure"]').count()) === 1,
+      `${width}: repair does not erase initial failure`,
+    );
 
-    raw = repairFixture();raw.history_runs[0].steps[0].result_history.pop();raw.history_runs[0].steps[0].status = "running";raw.history_runs[0].steps[0].valid=false;raw.tasks[0].status="running";mark("recheck-running");
-    await refresh(p);await section.locator('[data-repair-kind="recheck"][data-recorded-status="running"]').waitFor();
-    check(await section.locator('.repair-stage').count() === 3, `${width}: failure, repair and second QA remain together during retry`);
-    check(await section.locator('[data-repair-state="running"]').count() === 1, `${width}: retry is not marked passed early`);
+    raw = repairFixture();
+    raw.history_runs[0].steps[0].result_history.pop();
+    raw.history_runs[0].steps[0].status = "running";
+    raw.history_runs[0].steps[0].valid = false;
+    raw.tasks[0].status = "running";
+    mark("recheck-running");
+    await refresh(p);
+    await section
+      .locator('[data-repair-kind="recheck"][data-recorded-status="running"]')
+      .waitFor();
+    check(
+      (await section.locator(".repair-stage").count()) === 3,
+      `${width}: failure, repair and second QA remain together during retry`,
+    );
+    check(
+      (await section.locator('[data-repair-state="running"]').count()) === 1,
+      `${width}: retry is not marked passed early`,
+    );
 
-    raw = repairFixture();mark("passed");await refresh(p);await section.locator('[data-repair-state="passed"]').waitFor();
+    raw = repairFixture();
+    mark("passed");
+    await refresh(p);
+    await section.locator('[data-repair-state="passed"]').waitFor();
     const visibleText = await section.innerText();
-    check(visibleText.includes("True 수량") && visibleText.includes("내장 int") && visibleText.includes("15개 통과"), `${width}: completed overview still shows cause, fix and recheck outcome`);
-    check(await section.locator('.repair-stage').count() === 3, `${width}: final success does not collapse attempt history`);
-    check(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${width}: feedback stages have no page overflow`);
+    check(
+      visibleText.includes("True 수량") &&
+        visibleText.includes("내장 int") &&
+        visibleText.includes("15개 통과"),
+      `${width}: completed overview still shows cause, fix and recheck outcome`,
+    );
+    check(
+      (await section.locator(".repair-stage").count()) === 3,
+      `${width}: final success does not collapse attempt history`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+      `${width}: feedback stages have no page overflow`,
+    );
 
-    raw.history_runs[0].steps[0].valid=false;raw.tasks[0].status="stale";mark("stale");await refresh(p);await section.locator('[data-repair-state="stale"]').waitFor();
-    check(await section.locator('[data-repair-kind="recheck"].is-passed').count() === 0, `${width}: changed receipt removes the green verified retry state`);
-    const button=section.getByRole('button').first();await button.focus();await button.press('Enter');await p.locator('[aria-label="작업 상세"]').waitFor();
-    check(true,`${width}: feedback task link opens details with the keyboard`);
-    await p.getByRole('button',{name:'작업 상세 닫기',exact:true}).click();
+    raw.history_runs[0].steps[0].valid = false;
+    raw.tasks[0].status = "stale";
+    mark("stale");
+    await refresh(p);
+    await section.locator('[data-repair-state="stale"]').waitFor();
+    check(
+      (await section
+        .locator('[data-repair-kind="recheck"].is-passed')
+        .count()) === 0,
+      `${width}: changed receipt removes the green verified retry state`,
+    );
+    const button = section.getByRole("button").first();
+    await button.focus();
+    await button.press("Enter");
+    await p.locator('[aria-label="작업 상세"]').waitFor();
+    check(true, `${width}: feedback task link opens details with the keyboard`);
+    await p
+      .getByRole("button", { name: "작업 상세 닫기", exact: true })
+      .click();
 
-    if(width===320){
-      initialFailed();raw.history_runs[0].steps[0].result_history[1].summary='<script>window.syntheticRepairScript=true</script> '+('긴실패원인'.repeat(60));mark('long-summary');await refresh(p);await section.locator('[data-repair-state="failed"]').waitFor();
-      check((await section.innerText()).includes('<script>'), '320: source summaries render as text');
-      check(await p.evaluate(()=>window.syntheticRepairScript===undefined), '320: summary markup is never executed');
-      check(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1), '320: long unbroken summaries wrap inside the viewport');
+    if (width === 320) {
+      initialFailed();
+      raw.history_runs[0].steps[0].result_history[1].summary =
+        "<script>window.syntheticRepairScript=true</script> " +
+        "긴실패원인".repeat(60);
+      mark("long-summary");
+      await refresh(p);
+      await section.locator('[data-repair-state="failed"]').waitFor();
+      check(
+        (await section.innerText()).includes("<script>"),
+        "320: source summaries render as text",
+      );
+      check(
+        await p.evaluate(() => window.syntheticRepairScript === undefined),
+        "320: summary markup is never executed",
+      );
+      check(
+        await p.evaluate(
+          () => document.documentElement.scrollWidth <= innerWidth + 1,
+        ),
+        "320: long unbroken summaries wrap inside the viewport",
+      );
     }
+    await p.close();
+  }
+  // Explicit task scopes can cross executions without losing their exact bindings.
+  for (const width of [1440, 390, 320]) {
+    let raw = multiRunFixture();
+    raw.revision = `multi-run-${width}`;
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
+    const section = p.locator(".repair-flow");
+    await section.locator('[data-repair-state="passed"]').waitFor();
+    check(
+      (await section.locator(".repair-stage").count()) === 3,
+      `${width}: explicit scope without run_id shows the full feedback chain`,
+    );
+    check(
+      (
+        await section.locator('[data-repair-kind="repair"] footer').innerText()
+      ).includes("RUN-DEVELOPMENT"),
+      `${width}: development stage identifies its actual separate execution`,
+    );
+    check(
+      (
+        await section.locator('[data-repair-kind="failure"] footer').innerText()
+      ).includes("RUN-CURRENT"),
+      `${width}: QA stage identifies the current exact QA execution`,
+    );
+    check(
+      (await section
+        .locator('[data-repair-kind="repair"][data-run-id="RUN-DEVELOPMENT"]')
+        .count()) === 1,
+      `${width}: cross-run handoff is bound to the matching task`,
+    );
+
+    raw = multiRunFixture({ unavailable: true });
+    raw.revision = `multi-run-unreadable-${width}`;
+    await refresh(p);
+    await section.locator('[data-repair-state="unavailable"]').waitFor();
+    check(
+      (await section.locator(".repair-stage").count()) === 3,
+      `${width}: temporary file denial preserves failed, fixed and passed receipts`,
+    );
+    check(
+      (await section
+        .locator('[data-repair-kind="recheck"].is-passed')
+        .count()) === 0,
+      `${width}: unreadable evidence does not claim current verified success`,
+    );
+    const progress = await p.locator(".overall-progress").innerText();
+    check(
+      progress.includes("실행 기록 2 / 2 완료") && progress.includes("100%"),
+      `${width}: recorded completion stays visible during file denial`,
+    );
+    check(
+      progress.includes("현재 근거 확인 불가 2건") &&
+        !/(^|\s)0%/.test(progress),
+      `${width}: unknown verification is separate from zero execution progress`,
+    );
+    check(
+      (await section.innerText()).includes("15개 통과") &&
+        !(await section.innerText()).includes("근거 변경"),
+      `${width}: source QA success is retained without a fabricated changed-file claim`,
+    );
+    check(
+      !(await p.locator(".b-task-table").innerText()).includes("실행 실패"),
+      `${width}: unreadable verification is not a failed execution`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+      `${width}: cross-run and verification labels fit the mobile page`,
+    );
+
+    await p.getByRole("button", { name: /실행 이력/ }).click();
+    await p.locator(".run-history details").first().locator("summary").click();
+    const history = await p.locator(".run-history").innerText();
+    check(
+      history.includes("현재 근거 확인 불가") && !history.includes("기준 변경"),
+      `${width}: run history distinguishes unavailable verification from changed evidence`,
+    );
+    await p.getByRole("button", { name: "현재 작업", exact: true }).click();
+    raw = multiRunFixture();
+    raw.revision = `multi-run-restored-${width}`;
+    await refresh(p);
+    await section.locator('[data-repair-state="passed"]').waitFor();
+    check(
+      (await section.locator(".repair-stage").count()) === 3,
+      `${width}: restored verification returns to one exact feedback chain`,
+    );
+    check(
+      (await p.locator(".overall-progress").innerText()).includes(
+        "현재 범위 2 / 2 완료",
+      ),
+      `${width}: current verification resumes after file access recovers`,
+    );
     await p.close();
   }
   // Short mobile screens must expose each full feedback card despite stacked notices.
@@ -1606,36 +1830,96 @@ try {
     raw.revision = `synthetic-short-mobile-${width}`;
     raw.captured_at = new Date().toISOString();
     raw.host = {
-      connected: true, data_connected: true, execution_mode: "native",
-      native_monitor: { status: "unavailable", last_error: "보관된 실행 기록을 다시 연결하고 있습니다.", events_read: 0 },
-      supervisor: { configured: true, status: "retrying", provider: "codex", next_retry_seconds: 4, last_error: "추가 실행기 연결 확인" },
+      connected: true,
+      data_connected: true,
+      execution_mode: "native",
+      native_monitor: {
+        status: "unavailable",
+        last_error: "보관된 실행 기록을 다시 연결하고 있습니다.",
+        events_read: 0,
+      },
+      supervisor: {
+        configured: true,
+        status: "retrying",
+        provider: "codex",
+        next_retry_seconds: 4,
+        last_error: "추가 실행기 연결 확인",
+      },
     };
-    raw.artefacts = [{ id: "ART-UNAVAILABLE", path: "reports/unavailable.md", exists: true, sha256: null, access_status: "unavailable", access_message: "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다.", downloadable: false, previewable: false }];
-    const p = await pageFor((route) => route.fulfill({ json: raw }), undefined, false, width);
+    raw.artefacts = [
+      {
+        id: "ART-UNAVAILABLE",
+        path: "reports/unavailable.md",
+        exists: true,
+        sha256: null,
+        access_status: "unavailable",
+        access_message:
+          "파일에 접근할 수 없어 현재 버전을 확인하지 못했습니다.",
+        downloadable: false,
+        previewable: false,
+      },
+    ];
+    const p = await pageFor(
+      (route) => route.fulfill({ json: raw }),
+      undefined,
+      false,
+      width,
+    );
     await p.setViewportSize({ width, height: 667 });
-    await p.locator('.repair-flow').waitFor();
-    check(await p.locator('.workspace-notices > *').count() === 3, `${width}x667: stacked execution, runner and file notices are present`);
-    for (const kind of ['failure', 'repair', 'recheck']) {
+    await p.locator(".repair-flow").waitFor();
+    check(
+      (await p.locator(".workspace-notices > *").count()) === 3,
+      `${width}x667: stacked execution, runner and file notices are present`,
+    );
+    for (const kind of ["failure", "repair", "recheck"]) {
       const card = p.locator(`[data-repair-kind="${kind}"]`);
-      await card.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
+      await card.evaluate((el) =>
+        el.scrollIntoView({ block: "center", behavior: "instant" }),
+      );
       const visible = await card.evaluate((el) => {
         const r = el.getBoundingClientRect();
-        const targets = ['.repair-stage-heading', '.repair-stage-summary', 'footer button'];
+        const targets = [
+          ".repair-stage-heading",
+          ".repair-stage-summary",
+          "footer button",
+        ];
         return {
-          whole: r.top >= -1 && r.bottom <= innerHeight + 1 && r.left >= -1 && r.right <= innerWidth + 1,
+          whole:
+            r.top >= -1 &&
+            r.bottom <= innerHeight + 1 &&
+            r.left >= -1 &&
+            r.right <= innerWidth + 1,
           unobscured: targets.every((selector) => {
-            const target = el.querySelector(selector), b = target?.getBoundingClientRect();
+            const target = el.querySelector(selector),
+              b = target?.getBoundingClientRect();
             if (!b || b.width <= 0 || b.height <= 0) return false;
-            const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            const hit = document.elementFromPoint(
+              b.x + b.width / 2,
+              b.y + b.height / 2,
+            );
             return !!hit && el.contains(hit);
           }),
         };
       });
-      check(visible.whole, `${width}x667: ${kind} card scrolls fully into the visible viewport`);
-      check(visible.unobscured, `${width}x667: ${kind} heading, summary and task action are not covered by headers or notices`);
+      check(
+        visible.whole,
+        `${width}x667: ${kind} card scrolls fully into the visible viewport`,
+      );
+      check(
+        visible.unobscured,
+        `${width}x667: ${kind} heading, summary and task action are not covered by headers or notices`,
+      );
     }
-    check(await p.evaluate(() => document.scrollingElement.scrollTop > 0), `${width}x667: feedback is reachable through document scrolling`);
-    check(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${width}x667: feedback with notices has no horizontal page overflow`);
+    check(
+      await p.evaluate(() => document.scrollingElement.scrollTop > 0),
+      `${width}x667: feedback is reachable through document scrolling`,
+    );
+    check(
+      await p.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth + 1,
+      ),
+      `${width}x667: feedback with notices has no horizontal page overflow`,
+    );
     await p.close();
   }
   check(

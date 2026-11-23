@@ -304,3 +304,16 @@
     gap: 2px;
   }
 }
+
+.repair-outcome.is-unavailable {
+  color: #526875;
+  background: #eef2f5;
+}
+.repair-stage-run {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+.theme-light .overall-progress .progress-verification-note {
+  color: #526875;
+  white-space: normal;
+}

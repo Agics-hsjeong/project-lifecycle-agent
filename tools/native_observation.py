@@ -42,10 +42,19 @@ def _read(root):
     if len(raw) > MAX_STATE:
         raise ValueError("네이티브 관측 기록 크기 제한을 초과했습니다.")
     data = json.loads(raw)
-    if data.get("schema_version") != 1:
+    if not isinstance(data, dict) or type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise ValueError("네이티브 관측 기록 형식이 다릅니다.")
     for key, value in {"sessions": {}, "agents": {}, "events": [], "bindings": {}, "calls": {}, "focus": {}, "cursors": {}, "seq": 0}.items():
         data.setdefault(key, value)
+    if (type(data["seq"]) is not int or data["seq"] < 0 or not isinstance(data["events"], list)
+            or any(not isinstance(item, dict) for item in data["events"])
+            or any(not isinstance(data[key], dict) or any(not isinstance(item, dict) for item in data[key].values())
+                   for key in ("sessions", "agents", "bindings", "calls", "focus", "cursors"))):
+        raise ValueError("네이티브 관측 기록 형식이 다릅니다.")
+    for cursor in data["cursors"].values():
+        if (("offset" in cursor and (type(cursor["offset"]) is not int or cursor["offset"] < 0))
+                or any(key in cursor and not isinstance(cursor[key], dict) for key in ("pending", "actors"))):
+            raise ValueError("네이티브 관측 커서 형식이 다릅니다.")
     return data
 
 
@@ -137,11 +146,22 @@ def prepare_delegation(project, task_id, role, provider, session_id):
         if task_id not in _task_ids(root):
             raise ValueError("실제 작업 ID가 필요합니다.")
         from tools import workspace
-        execution = workspace.read(root)["tasks"].get(task_id, {}).get("execution")
+        task_meta = workspace.read(root)["tasks"].get(task_id, {})
+        execution = task_meta.get("execution")
+        outputs = []
         if execution is not None:
-            execution = workspace.validate_execution(root, execution)
-            for relative in execution["expected_outputs"]:
-                ensure_project_directory(workspace.execution_path(root, relative).parent, root)
+            outputs.extend(workspace.validate_execution(root, execution)["expected_outputs"])
+        # Native host work may use a bound RUN plan without a CLI execution.
+        # Prepare only that exact current step's declared parents, never infer by role.
+        ref = task_meta.get("step_ref")
+        if ref:
+            from tools import runs
+            producer = next((r for r in runs.read(root)["runs"] if r["id"] == ref["run_id"]), None)
+            step = next((item for item in producer["steps"] if item["id"] == ref["step_id"]), None) if producer else None
+            if step is not None:
+                outputs.extend(step.get("expected_outputs", []))
+        for relative in dict.fromkeys(outputs):
+            ensure_project_directory(workspace.execution_path(root, relative).parent, root)
         data = _read(root)
         if len(data["bindings"]) >= MAX_BINDINGS:
             raise ValueError("이 프로젝트의 위임 연결 한도에 도달했습니다.")
@@ -370,17 +390,17 @@ def enrich_snapshot(project, result):
             observed = running or latest
             task.update(execution_state=observed["status"], native_agent_id=observed["native_agent_id"], session_id=observed["session_id"],
                         runtime_source=observed["source"], native_started_at=observed.get("started_at"), native_finished_at=observed.get("finished_at"))
-            if running and task["ledger_status"] not in {"done", "skipped", "failed", "stale"}:
+            if running and task["ledger_status"] not in {"done", "skipped", "failed", "stale", "verification_unavailable"}:
                 task.update(status="running", observed_status="running", latest_action=running["current_action"], attempt_started_at=running.get("started_at"))
-            elif latest["status"] == "completed" and task["ledger_status"] not in {"done", "skipped", "failed", "stale"}:
+            elif latest["status"] == "completed" and task["ledger_status"] not in {"done", "skipped", "failed", "stale", "verification_unavailable"}:
                 task["result_pending"] = True
-            elif latest["status"] == "failed" and task["ledger_status"] not in {"done", "skipped", "stale"}:
+            elif latest["status"] == "failed" and task["ledger_status"] not in {"done", "skipped", "stale", "verification_unavailable"}:
                 task["status"] = "failed"
         failed = max(failures, key=lambda e: e["at"]) if failures else None
         if failed and (not matching or failed["at"] > max(a.get("last_seen", "") for a in matching)):
             task.update(execution_state="failed", runtime_source=failed["source"], session_id=failed["session_id"],
                         latest_action=failed["summary"], native_finished_at=failed["at"])
-            if task["ledger_status"] not in {"done", "skipped", "stale"}:
+            if task["ledger_status"] not in {"done", "skipped", "stale", "verification_unavailable"}:
                 task["status"] = "failed"
     events = [{k: v for k, v in event.items() if k != "signature"} for event in native["events"]]
     result["activities"] = sorted(result.get("activities", []) + events, key=lambda e: (e.get("at", ""), e.get("seq", 0)))[-MAX_EVENTS:]

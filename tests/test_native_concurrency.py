@@ -382,5 +382,164 @@ class NativeConcurrencyTests(unittest.TestCase):
         self.assertEqual(self.path.read_bytes(), self.original)
 
 
+class ObservationTurnTests(unittest.TestCase):
+    def setUp(self):
+        parent = starter.ROOT / ".test-output"
+        parent.mkdir(exist_ok=True)
+        self.temp = tempfile.TemporaryDirectory(prefix="observation-turn-", dir=parent)
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name).resolve()
+
+    def wait_queue(self, length):
+        end = time.monotonic() + 3
+        while time.monotonic() < end:
+            with storage._TURN_REGISTRY_LOCK:
+                turn = storage._TURN_REGISTRY.get(self.root)
+            if turn is not None:
+                with turn.condition:
+                    if len(turn.queue) == length:
+                        return
+            time.sleep(.002)
+        self.fail("observation request did not enter the expected queue")
+
+    def test_fifo_prevents_local_readers_or_collector_from_overtaking(self):
+        order, errors, threads = [], [], []
+        def worker(index):
+            try:
+                with storage.observation_turn(self.root):
+                    order.append(index)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+        with storage.observation_turn(self.root):
+            for index in range(4):
+                thread = threading.Thread(target=worker, args=(index,))
+                threads.append(thread); thread.start()
+                self.wait_queue(index + 1)
+        for thread in threads:
+            thread.join(3)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(order, [0, 1, 2, 3])
+        self.assertFalse((self.root / 'state/write.lock').exists())
+
+    def test_reentrant_owner_does_not_deadlock_or_release_before_outer_exit(self):
+        entered = threading.Event()
+        def worker():
+            with storage.observation_turn(self.root):
+                entered.set()
+        with storage.observation_turn(self.root):
+            thread = threading.Thread(target=worker); thread.start()
+            self.wait_queue(1)
+            with storage.observation_turn(self.root, timeout=0):
+                self.assertFalse(entered.is_set())
+            self.assertFalse(entered.is_set())
+        thread.join(3)
+        self.assertTrue(entered.is_set())
+
+    def test_cancelled_front_waiter_removes_only_its_ticket(self):
+        stop, finished, follower = threading.Event(), threading.Event(), threading.Event()
+        errors = []
+        def cancelled():
+            try:
+                with storage.observation_turn(self.root, stop=stop, timeout=5):
+                    errors.append('cancelled waiter was granted a turn')
+            except storage.ObservationTurnStopped:
+                finished.set()
+        def next_waiter():
+            with storage.observation_turn(self.root):
+                follower.set()
+        with storage.observation_turn(self.root):
+            first = threading.Thread(target=cancelled); first.start(); self.wait_queue(1)
+            second = threading.Thread(target=next_waiter); second.start(); self.wait_queue(2)
+            stop.set(); first.join(.5)
+            self.assertTrue(finished.is_set())
+            self.wait_queue(1)
+            self.assertFalse(follower.is_set())
+        second.join(3)
+        self.assertTrue(follower.is_set()); self.assertEqual(errors, [])
+
+    def test_timed_out_front_waiter_does_not_strand_following_request(self):
+        outcomes, follower = [], threading.Event()
+        def timeout():
+            try:
+                with storage.observation_turn(self.root, timeout=.04):
+                    outcomes.append('incorrectly granted')
+            except storage.ObservationTurnBusy as exc:
+                outcomes.append(exc.status)
+        def later():
+            with storage.observation_turn(self.root):
+                follower.set()
+        with storage.observation_turn(self.root):
+            first = threading.Thread(target=timeout); first.start(); self.wait_queue(1)
+            second = threading.Thread(target=later); second.start(); self.wait_queue(2)
+            first.join(.5)
+            self.assertEqual(outcomes, [409]); self.wait_queue(1)
+        second.join(3)
+        self.assertTrue(follower.is_set())
+
+    def test_different_projects_have_independent_turns(self):
+        other = self.root / 'other'; other.mkdir(); entered = threading.Event()
+        def worker():
+            with storage.observation_turn(other):
+                entered.set()
+        with storage.observation_turn(self.root):
+            thread = threading.Thread(target=worker); thread.start(); thread.join(.5)
+            self.assertTrue(entered.is_set())
+        thread.join(3)
+
+    def test_body_failure_releases_turn_and_registry_does_not_leak_project(self):
+        with self.assertRaisesRegex(ValueError, 'body failure'):
+            with storage.observation_turn(self.root):
+                raise ValueError('body failure')
+        with storage.observation_turn(self.root, timeout=0):
+            self.assertIn(self.root, storage._TURN_REGISTRY)
+        self.assertNotIn(self.root, storage._TURN_REGISTRY)
+
+    def test_existing_engine_lock_owner_does_not_wait_for_observer_holding_turn(self):
+        gate_held, acquired, errors = threading.Event(), threading.Event(), []
+        def observer():
+            try:
+                with storage.observation_turn(self.root):
+                    gate_held.set(); deadline = time.monotonic() + 3
+                    while True:
+                        try:
+                            with storage.lock(self.root):
+                                acquired.set()
+                            break
+                        except storage.ProjectBusyError:
+                            if time.monotonic() >= deadline:
+                                raise
+                            time.sleep(.002)
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+        with storage.lock(self.root):
+            thread = threading.Thread(target=observer); thread.start()
+            self.assertTrue(gate_held.wait(3))
+            with storage.observation_turn(self.root, timeout=.04):
+                self.assertTrue((self.root / 'state/write.lock').is_file())
+            self.assertFalse(acquired.is_set())
+        thread.join(3)
+        self.assertFalse(thread.is_alive()); self.assertTrue(acquired.is_set())
+        self.assertEqual(errors, [])
+
+    def test_observation_queue_never_changes_cross_process_lock_semantics(self):
+        self.assertFalse((self.root / 'state').exists())
+        with storage.observation_turn(self.root):
+            self.assertFalse((self.root / 'state').exists())
+        stop = threading.Event(); stop.set()
+        with self.assertRaises(storage.ObservationTurnStopped):
+            with storage.observation_turn(self.root, stop=stop):
+                self.fail('cancelled call executed')
+        for timeout in [True, -1, float('nan'), float('inf'), None]:
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                with storage.observation_turn(self.root, timeout=timeout):
+                    self.fail('invalid wait budget was accepted')
+
+    def test_monitor_recognizes_local_queue_busy_for_only_exact_project(self):
+        error = storage.ObservationTurnBusy(self.root)
+        self.assertTrue(bridge._monitor_busy(self.root, error))
+        self.assertFalse(bridge._monitor_busy(self.root / 'different', error))
+
+
 if __name__ == "__main__":
     unittest.main()

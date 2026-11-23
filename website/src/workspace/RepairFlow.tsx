@@ -15,6 +15,10 @@ function stageLabel(stage: RepairStage) {
 function statusLabel(stage: RepairStage) {
   if (stage.status === "succeeded") {
     if (!stage.is_latest) return "당시 완료";
+    if (stage.verification_state === "unavailable")
+      return "현재 근거 확인 불가";
+    if (stage.verification_state === "changed") return "근거 변경";
+    if (stage.verification_state === "pending") return "검증 확인 중";
     if (stage.valid === false) return "근거 변경";
     if (stage.valid !== true) return "통과 기록";
     return stage.kind === "repair" ? "수정 완료" : "통과";
@@ -34,7 +38,12 @@ function statusLabel(stage: RepairStage) {
 function stageTone(stage: RepairStage) {
   if (stage.status === "failed") return "failed";
   if (stage.status === "running") return "running";
-  if (stage.status === "succeeded" && stage.is_latest && stage.valid === true)
+  if (
+    stage.status === "succeeded" &&
+    stage.is_latest &&
+    stage.valid === true &&
+    (!stage.verification_state || stage.verification_state === "valid")
+  )
     return "passed";
   return "neutral";
 }
@@ -53,6 +62,7 @@ function flowLabel(flow: Flow) {
     running: "QA 재검증 중",
     failed: "QA 실패",
     stale: "근거 변경 · 재검증 필요",
+    unavailable: "통과 기록 · 현재 근거 확인 불가",
     unresolved: "실행 기록 확인 필요",
   }[flow.state];
 }
@@ -90,7 +100,7 @@ export function RepairFlow({
           <header className="repair-flow-header">
             <div>
               <p className="repair-eyebrow">
-                QA 수정 흐름 <span>{flow.run_id}</span>
+                QA 수정 흐름 <span>{flow.run_ids.join(" · ")}</span>
               </p>
               <h2 id={`repair-title-${flow.task_id}`}>실패부터 재검증까지</h2>
             </div>
@@ -121,6 +131,7 @@ export function RepairFlow({
               <li
                 className={`repair-stage is-${stageTone(stage)}`}
                 key={stage.id}
+                data-run-id={stage.run_id}
                 data-repair-kind={stage.kind}
                 data-attempt={stage.attempt ?? ""}
                 data-recorded-status={stage.status}
@@ -165,6 +176,9 @@ export function RepairFlow({
                     {stage.task_id}
                   </button>
                   <span>{ROLE[stage.role] || stage.role}</span>
+                  {flow.run_ids.length > 1 && (
+                    <span className="repair-stage-run">{stage.run_id}</span>
+                  )}
                   <time
                     dateTime={stage.at || undefined}
                     title={stage.at || undefined}

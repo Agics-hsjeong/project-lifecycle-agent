@@ -145,6 +145,39 @@ def restricted_sids():
         kernel.CloseHandle(token)
 
 
+def effective_user_sid():
+    """Identify the effective writer without changing tokens or privileges."""
+    advapi, kernel = _api()
+    kernel.GetCurrentThread.restype = wintypes.HANDLE
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    advapi.OpenThreadToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.BOOL, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.OpenThreadToken.restype = wintypes.BOOL
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.GetTokenInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(wintypes.DWORD)]
+    advapi.GetTokenInformation.restype = wintypes.BOOL
+    token = wintypes.HANDLE()
+    if not advapi.OpenThreadToken(kernel.GetCurrentThread(), 8, True, ctypes.byref(token)):
+        error = ctypes.get_last_error()
+        if error != 1008:
+            raise ctypes.WinError(error)
+        _check(advapi.OpenProcessToken(kernel.GetCurrentProcess(), 8, ctypes.byref(token)))
+    try:
+        needed = wintypes.DWORD()
+        if not advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed)) and ctypes.get_last_error() != 122:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if needed.value < ctypes.sizeof(ctypes.c_void_p) + 4:
+            raise ValueError("실행 작성자 토큰 정보가 잘못되었습니다.")
+        buffer = ctypes.create_string_buffer(needed.value)
+        _check(advapi.GetTokenInformation(token, 1, buffer, len(buffer), ctypes.byref(needed)))
+        sid = ctypes.c_void_p.from_buffer(buffer).value
+        if not sid or not ctypes.addressof(buffer) <= sid < ctypes.addressof(buffer) + len(buffer):
+            raise ValueError("실행 작성자 SID 정보가 잘못되었습니다.")
+        return _sid_text(sid, advapi, kernel)
+    finally:
+        kernel.CloseHandle(token)
+
+
 def _unmapped_runtime_sid(sid):
     """Exclude real accounts/groups; an unknown SID alone grants no authority."""
     parts = sid.split("-")

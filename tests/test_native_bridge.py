@@ -1,14 +1,17 @@
 """Incremental Codex transcript adapter safety and native identity regressions."""
 import contextlib
+import ctypes
 import io
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
-from tools import lifecycle, native_bridge as bridge, native_observation as observation, starter
+from tools import lifecycle, native_bridge as bridge, native_observation as observation, starter, storage
 
 
 class NativeBridgeTests(unittest.TestCase):
@@ -192,6 +195,158 @@ class NativeBridgeTests(unittest.TestCase):
     def test_all_tool_pending_calls_have_finite_bound(self):
         state={'session_id':self.SESSION,'pending':{str(i):{'name':'local_tool','call_id':str(i)} for i in range(500)},'actors':{}}
         with self.assertRaises(ValueError):bridge.consume_record(self.root,state,self.record('function_call',namespace='functions',name='exec',call_id='new-call',arguments='{}'),50)
+
+
+    def monitor_thread(self):
+        class History(dict):
+            def update(self, *args, **kwargs):
+                super().update(*args, **kwargs)
+                seen.append(dict(self))
+        seen = []
+        stop, health = threading.Event(), History()
+        thread = threading.Thread(target=bridge.monitor, args=(self.root, stop, health))
+        thread.start()
+        self.addCleanup(lambda: (stop.set(), thread.join(5)))
+        return stop, health, thread, seen
+
+    def until(self, predicate, timeout=4):
+        end = time.monotonic() + timeout
+        while not predicate():
+            if time.monotonic() >= end:
+                self.fail("monitor did not reach the expected bounded state")
+            time.sleep(.01)
+
+    def held_project_lock(self):
+        held, release = threading.Event(), threading.Event()
+        def hold():
+            with storage.lock(self.root):
+                held.set()
+                release.wait(5)
+        thread = threading.Thread(target=hold)
+        thread.start()
+        self.addCleanup(lambda: (release.set(), thread.join(5)))
+        self.assertTrue(held.wait(3))
+        return release, thread
+
+    def test_monitor_short_real_reader_lock_waits_then_delivers_without_warning(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        self.append({'type': 'event_msg', 'timestamp': self.AT, 'payload': {'type': 'task_complete'}})
+        release, holder = self.held_project_lock()
+        stop, health, thread, seen = self.monitor_thread()
+        time.sleep(.1)
+        self.assertFalse(any(x.get('status') == 'unavailable' for x in seen))
+        release.set(); holder.join(3)
+        self.until(lambda: health.get('status') == 'ready')
+        stop.set(); thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertFalse(any(x.get('status') in {'waiting', 'unavailable'} for x in seen))
+        self.assertTrue(any(x.get('last_success_at') for x in seen))
+        self.assertEqual(self.events()[-1]['kind'], 'session_idle')
+        self.assertFalse((self.root / 'state/write.lock').exists())
+
+    def test_monitor_persistent_lock_is_waiting_then_warns_and_recovers_without_cursor_loss(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        original = (self.root / observation.STORE).read_bytes()
+        self.append({'type': 'event_msg', 'timestamp': self.AT, 'payload': {'type': 'task_complete'}})
+        release, holder = self.held_project_lock()
+        with patch.object(bridge, 'MONITOR_LOCK_GRACE', .04), patch.object(bridge, 'MONITOR_POLL_INTERVAL', .02), patch.object(bridge, 'MONITOR_BUSY_WARNING', .1):
+            stop, health, thread, seen = self.monitor_thread()
+            self.until(lambda: any(x.get('status') == 'waiting' for x in seen))
+            self.assertIsNone(next(x for x in seen if x['status'] == 'waiting')['last_error'])
+            self.until(lambda: health.get('error_code') == 'lock_timeout')
+            self.assertEqual(health['status'], 'unavailable')
+            self.assertEqual((self.root / observation.STORE).read_bytes(), original)
+            release.set(); holder.join(3)
+            self.until(lambda: health.get('status') == 'ready')
+            self.assertIsNone(health['waiting_since'])
+            self.assertIsNone(health['last_error'])
+            stop.set(); thread.join(3)
+        self.assertEqual([x['kind'] for x in self.events()].count('session_idle'), 1)
+
+    def test_monitor_stop_interrupts_project_lock_grace_without_recovering_anything(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        release, holder = self.held_project_lock()
+        with patch.object(bridge, 'MONITOR_LOCK_GRACE', 10):
+            stop, health, thread, seen = self.monitor_thread()
+            time.sleep(.05); start = time.monotonic(); stop.set(); thread.join(1)
+        self.assertFalse(thread.is_alive())
+        self.assertLess(time.monotonic() - start, .5)
+        self.assertTrue((self.root / 'state/write.lock').is_file())
+        release.set(); holder.join(3)
+        self.assertEqual(health['status'], 'stopped')
+
+    def test_monitor_pending_transaction_is_real_error_and_is_never_deleted(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        pending = self.root / 'state/pending.json'; pending.write_bytes(b'preserve this journal')
+        stop, health, thread, seen = self.monitor_thread()
+        self.until(lambda: health.get('status') == 'unavailable')
+        self.assertEqual(health['error_code'], 'state_error')
+        self.assertIsNone(health['waiting_since'])
+        stop.set(); thread.join(3)
+        self.assertEqual(pending.read_bytes(), b'preserve this journal')
+
+    def test_damaged_old_source_does_not_starve_healthy_current_source(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        other = self.make_source(self.OTHER)
+        bridge.attach(self.root, self.OTHER, str(other))
+        original_offset = observation.cursor(self.root, 'codex:' + self.SESSION)['offset']
+        with self.source.open('a', encoding='utf-8') as stream:
+            stream.write('PRIVATE MALFORMED SOURCE CONTENT\n')
+        self.append({'type': 'event_msg', 'timestamp': self.AT, 'payload': {'type': 'task_complete'}}, source=other)
+        stop, health, thread, seen = self.monitor_thread()
+        self.until(lambda: health.get('status') == 'unavailable')
+        self.assertEqual(health['error_code'], 'source_invalid')
+        stop.set(); thread.join(3)
+        self.assertEqual(observation.cursor(self.root, 'codex:' + self.SESSION)['offset'], original_offset)
+        self.assertEqual(self.events(self.OTHER)[-1]['kind'], 'session_idle')
+        self.assertNotIn('PRIVATE', json.dumps(health))
+        self.assertNotIn(str(self.source), json.dumps(health))
+
+    def test_monitor_corrupt_projection_shapes_report_error_instead_of_killing_thread(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        path = self.root / observation.STORE
+        original = path.read_bytes(); valid = json.loads(original)
+        bad = [[], {**valid, 'seq': True}, {**valid, 'cursors': {'codex:bad': []}}, {**valid, 'cursors': {'codex:bad': {'pending': []}}}]
+        for value in bad:
+            with self.subTest(value=value):
+                raw = json.dumps(value).encode(); path.write_bytes(raw)
+                stop, health, thread, seen = self.monitor_thread()
+                self.until(lambda: health.get('status') == 'unavailable')
+                self.assertTrue(thread.is_alive())
+                self.assertEqual(health['error_code'], 'state_error')
+                stop.set(); thread.join(3)
+                self.assertEqual(path.read_bytes(), raw)
+                path.write_bytes(original)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows denied file sharing')
+    def test_monitor_actual_source_access_denial_warns_and_recovers(self):
+        bridge.attach(self.root, self.SESSION, str(self.source))
+        self.append({'type': 'event_msg', 'timestamp': self.AT, 'payload': {'type': 'task_complete'}})
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+        kernel.CreateFileW.restype = ctypes.c_void_p
+        kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+        handle = kernel.CreateFileW(str(self.source), 0x80000000, 0, None, 3, 0, None)
+        self.assertNotEqual(handle, ctypes.c_void_p(-1).value)
+        try:
+            stop, health, thread, seen = self.monitor_thread()
+            self.until(lambda: health.get('status') == 'unavailable')
+            self.assertEqual(health['error_code'], 'access_denied')
+            self.assertIsNone(health['waiting_since'])
+        finally:
+            kernel.CloseHandle(handle)
+        self.until(lambda: health.get('status') == 'ready')
+        stop.set(); thread.join(3)
+        self.assertEqual(self.events()[-1]['kind'], 'session_idle')
+
+    def test_monitor_never_retries_untyped_or_wrong_path_lock_errors(self):
+        for error in [ValueError('private invalid source'), storage.ProjectBusyError('wrong lock')]:
+            if isinstance(error, storage.ProjectBusyError):
+                error.__cause__ = FileExistsError(17, 'exists', str(self.base / 'unrelated.lock'))
+            self.assertFalse(bridge._monitor_busy(self.root, error))
+        with patch('tools.native_bridge.Path.resolve', side_effect=PermissionError('private denied root')):
+            self.assertFalse(bridge._monitor_busy(self.root, PermissionError('private denied source')))
+            self.assertFalse(bridge._monitor_busy(self.root, storage.ProjectBusyError('unverifiable lock')))
 
 
 if __name__=='__main__':unittest.main()

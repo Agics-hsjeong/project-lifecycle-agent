@@ -1,4 +1,4 @@
-import './check-repair-flow.mjs';
+import "./check-repair-flow.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -215,6 +215,10 @@ test("scope progress separates completed, excluded, failed and ordinary waiting"
     total: 3,
     applicable: 2,
     done: 1,
+    recorded_done: 1,
+    recorded_applicable: 2,
+    recorded_percent: 50,
+    verification_unavailable: 0,
     excluded: 1,
     active: 0,
     attention: 1,
@@ -530,7 +534,14 @@ for (const [label, change] of [
   });
 
 test("native observation health is typed independently of the data connection", () => {
-  for (const status of ["ready", "starting", "unavailable", "disabled"]) {
+  for (const status of [
+    "ready",
+    "starting",
+    "waiting",
+    "unavailable",
+    "disabled",
+    "stopped",
+  ]) {
     const raw = fixture();
     raw.host = {
       connected: true,
@@ -558,6 +569,21 @@ test("native observation health is typed independently of the data connection", 
 });
 for (const [name, monitor] of [
   ["monitor status", { status: "pretend-connected" }],
+  [
+    "monitor invalid wait time",
+    { status: "waiting", waiting_since: "yesterday" },
+  ],
+  [
+    "monitor no time zone",
+    { status: "waiting", last_success_at: "2026-11-23T04:00:00" },
+  ],
+  [
+    "monitor unknown error code",
+    { status: "unavailable", error_code: "raw private path" },
+  ],
+  ["monitor retry negative", { status: "waiting", retry_seconds: -1 }],
+  ["monitor retry bound", { status: "waiting", retry_seconds: 61 }],
+
   ["monitor error type", { status: "unavailable", last_error: {} }],
   [
     "monitor error bound",
@@ -573,6 +599,29 @@ for (const [name, monitor] of [
     raw.host = { connected: true, native_monitor: monitor };
     assert.throws(() => normalise(raw), /스냅샷/);
   });
+
+test("native monitor wait metadata preserves the last successful receive time", () => {
+  const raw = fixture();
+  raw.host = {
+    connected: true,
+    native_monitor: {
+      status: "waiting",
+      last_error: null,
+      error_code: null,
+      waiting_since: "2026-11-23T04:00:01+00:00",
+      last_success_at: "2026-11-23T04:00:00.123456+00:00",
+      retry_seconds: 0.75,
+      events_read: 2,
+    },
+  };
+  const value = normalise(raw);
+  assert.equal(value.host.native_monitor.status, "waiting");
+  assert.equal(value.host.native_monitor.retry_seconds, 0.75);
+  assert.equal(
+    value.host.native_monitor.last_success_at,
+    raw.host.native_monitor.last_success_at,
+  );
+});
 
 test("unreadable artefact preserves denial without claiming a hash", () => {
   const raw = fixture();

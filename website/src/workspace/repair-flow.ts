@@ -18,12 +18,14 @@ type StepHistory = {
   role?: string;
   status: string;
   valid?: boolean;
+  verification_state?: "valid" | "changed" | "unavailable" | "pending";
   superseded?: boolean;
   attempts?: number | null;
   result_history?: ResultHistoryRow[];
   history_omitted?: number;
 };
 type Attempt = {
+  run_id: string;
   step: StepHistory;
   task: Task;
   key: string;
@@ -36,6 +38,7 @@ export type RepairStage = {
   id: string;
   kind: "failure" | "repair" | "recheck";
   task_id: string;
+  run_id: string;
   role: string;
   attempt: number | null;
   status: string;
@@ -48,11 +51,13 @@ export type RepairStage = {
   sequence: number | null;
   started_sequence: number | null;
   valid: boolean | undefined;
+  verification_state: StepHistory["verification_state"];
   is_latest: boolean;
 };
 export type RepairFlow = {
   id: string;
   run_id: string;
+  run_ids: string[];
   task_id: string;
   title: string;
   qa_attempts_count: number | null;
@@ -63,13 +68,14 @@ export type RepairFlow = {
   omitted_stages: number;
   history_omitted: number;
   ordering: "chronological" | "recorded";
-  state: "passed" | "running" | "failed" | "stale" | "unresolved";
+  state:
+    "passed" | "running" | "failed" | "stale" | "unavailable" | "unresolved";
   ambiguous_repairs: number;
 };
 const ENGINEERING = new Set(["backend", "frontend", "database", "devops"]);
 const terminal = (status: string) => status !== "running";
 
-function attempts(step: StepHistory, task: Task): Attempt[] {
+function attempts(step: StepHistory, task: Task, run_id: string): Attempt[] {
   const groups = new Map<string, Attempt>();
   for (const row of step.result_history || []) {
     // An old outcome without a recorded start never becomes an invented attempt.
@@ -83,6 +89,7 @@ function attempts(step: StepHistory, task: Task): Attempt[] {
       if (!existing.failed && row.status === "failed") existing.failed = row;
     } else {
       groups.set(key, {
+        run_id,
         step,
         task,
         key,
@@ -125,6 +132,7 @@ function stageOf(
     id: `${attempt.task.id}:${attempt.key}:${kind}`,
     kind,
     task_id: attempt.task.id,
+    run_id: attempt.run_id,
     role: attempt.task.role,
     attempt: outcome.attempt,
     status: outcome.status,
@@ -137,6 +145,7 @@ function stageOf(
     sequence: outcome.sequence ?? null,
     started_sequence: attempt.start?.sequence ?? null,
     valid: attempt.step.valid,
+    verification_state: attempt.step.verification_state,
     is_latest: latest,
   };
 }
@@ -144,31 +153,55 @@ function stageOf(
 /** Read recorded attempts only. Shared project membership is never a repair link. */
 export function buildRepairFlows(snapshot: Snapshot): RepairFlow[] {
   const scope = snapshot.current_scope;
-  if (!scope?.run_id || !Array.isArray(scope.task_ids)) return [];
-  const run = (snapshot.history_runs || []).find(
-    (item: any) => item.id === scope.run_id,
-  );
-  if (!run || !Array.isArray(run.steps)) return [];
+  if (!scope || !Array.isArray(scope.task_ids)) return [];
   const current = new Set<string>(scope.task_ids);
-  const bound = (run.steps as StepHistory[]).flatMap((step) => {
-    if (!step.task_id || step.superseded || !Array.isArray(step.result_history))
+  // An explicit scope may span runs. Each task still needs exactly one current
+  // run/step binding; scope membership alone never establishes a handoff.
+  const candidates = (snapshot.history_runs || []).flatMap((run: any) => {
+    if ((scope.run_id && run.id !== scope.run_id) || !Array.isArray(run.steps))
       return [];
-    const task = snapshot.tasks.find(
-      (item) => item.id === step.task_id && current.has(item.id),
-    );
-    const ref =
-      task?.run_id != null || task?.step_id != null
+    return (run.steps as StepHistory[]).flatMap((step) => {
+      if (
+        !step.task_id ||
+        step.superseded ||
+        !Array.isArray(step.result_history)
+      )
+        return [];
+      const tasks = snapshot.tasks.filter(
+        (task) => task.id === step.task_id && current.has(task.id),
+      );
+      if (tasks.length !== 1) return [];
+      const task = tasks[0];
+      const flat = task.run_id != null || task.step_id != null;
+      const ref = flat
         ? { run_id: task.run_id, step_id: task.step_id }
-        : task?.step_ref;
-    if (
-      !task ||
-      task.role !== step.role ||
-      ref?.run_id !== run.id ||
-      ref?.step_id !== step.id
-    )
-      return [];
-    return [{ step, task, attempts: attempts(step, task) }];
+        : task.step_ref;
+      if (
+        task.role !== step.role ||
+        ref?.run_id !== run.id ||
+        ref?.step_id !== step.id ||
+        (flat &&
+          task.step_ref &&
+          (task.step_ref.run_id !== ref.run_id ||
+            task.step_ref.step_id !== ref.step_id))
+      )
+        return [];
+      return [
+        {
+          run_id: run.id as string,
+          step,
+          task,
+          attempts: attempts(step, task, run.id),
+        },
+      ];
+    });
   });
+  // Duplicate history projections must not attach to an arbitrary generation.
+  const bound = candidates.filter(
+    (candidate: any) =>
+      candidates.filter((other: any) => other.task.id === candidate.task.id)
+        .length === 1,
+  ) as { run_id: string; step: StepHistory; task: Task; attempts: Attempt[] }[];
   const qa = bound.filter(
     (item) => item.task.role === "qa" && item.attempts.some((a) => a.failed),
   );
@@ -195,10 +228,22 @@ export function buildRepairFlows(snapshot: Snapshot): RepairFlow[] {
         (beforeRetry == null || beforeRetry < 0)
       );
     });
-    if (matches.length === 1) {
-      const target = matches[0].attempt;
+    const candidate = matches.length === 1 ? matches[0] : null;
+    const after = candidate
+      ? compareRows(candidate.attempt.failed, repair.start)
+      : null;
+    const before = candidate?.next
+      ? compareRows(repair.start, candidate.next)
+      : null;
+    if (
+      candidate &&
+      after != null &&
+      after < 0 &&
+      (!candidate.next || (before != null && before < 0))
+    ) {
+      const target = candidate.attempt;
       links.set(target, [...(links.get(target) || []), repair]);
-    } else if (matches.length > 1) {
+    } else if (matches.length > 0) {
       ambiguous.set(repair, new Set(matches.map((match) => match.attempt)));
     }
   }
@@ -247,11 +292,17 @@ export function buildRepairFlows(snapshot: Snapshot): RepairFlow[] {
       else if (latest.status === "failed") state = "failed";
       else if (latest.status === "succeeded")
         state =
-          item.step.valid === true
-            ? "passed"
-            : item.step.valid === false
+          item.step.verification_state === "unavailable"
+            ? "unavailable"
+            : item.step.verification_state === "changed"
               ? "stale"
-              : "unresolved";
+              : item.step.valid === true &&
+                  (!item.step.verification_state ||
+                    item.step.verification_state === "valid")
+                ? "passed"
+                : item.step.valid === false && !item.step.verification_state
+                  ? "stale"
+                  : "unresolved";
     }
     if (
       allStages.some(
@@ -263,8 +314,9 @@ export function buildRepairFlows(snapshot: Snapshot): RepairFlow[] {
     )
       state = "running";
     return {
-      id: `${run.id}:${item.task.id}`,
-      run_id: run.id,
+      id: `${item.run_id}:${item.task.id}`,
+      run_id: item.run_id,
+      run_ids: [...new Set(allStages.map((stage) => stage.run_id))],
       task_id: item.task.id,
       title: item.task.title,
       qa_attempts_count: item.step.attempts ?? null,
